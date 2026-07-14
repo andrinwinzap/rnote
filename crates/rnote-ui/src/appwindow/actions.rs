@@ -898,7 +898,6 @@ impl RnAppWindow {
                 if let Some(widget_flags) = widget_flags {
                     appwindow.handle_widget_flags(widget_flags, &canvas);
                 }
-                appwindow.main_header().canvasmenu().popovermenu().popdown();
             }
         ));
 
