@@ -270,6 +270,11 @@ impl Engine {
     /// Distance (in surface coordinates) below which an added bookmark replaces an existing one.
     pub(crate) const BOOKMARK_MERGE_DIST: f64 = 32.0;
 
+    /// Returns the engine's shared config handle (cheap to clone).
+    pub fn engine_config(&self) -> &EngineConfigShared {
+        &self.config
+    }
+
     pub fn install_config(
         &mut self,
         config: &EngineConfigShared,

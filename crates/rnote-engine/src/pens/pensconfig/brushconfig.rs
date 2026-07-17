@@ -1,4 +1,5 @@
 // Imports
+use crate::pens::pensconfig::rulerconfig::RulerConfig;
 use crate::store::chrono_comp::StrokeLayer;
 use rand::{RngExt, SeedableRng};
 use rnote_compose::Style;
@@ -114,6 +115,8 @@ pub struct BrushConfig {
     /// are automatically replaced with the recognized shape.
     #[serde(rename = "shape_recognition_enabled")]
     pub shape_recognition_enabled: bool,
+    #[serde(rename = "ruler_config")]
+    pub ruler_config: RulerConfig,
 }
 
 impl BrushConfig {
