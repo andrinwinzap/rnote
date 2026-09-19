@@ -35,7 +35,9 @@ message('Configuring settings GSchema file')
 
 gschema_conf = configuration_data()
 gschema_conf.set('APP_ID', app_id)
-gschema_conf.set('APP_IDPATH', app_idpath)
+# Use the settings path derived from the app id, not 'app_idpath' (which is the GResource base
+# path), so this fork does not share its dconf keys with an installed upstream Rnote.
+gschema_conf.set('APP_IDPATH', settings_idpath)
 gschema_conf.set('APP_NAME', app_name)
 configure_file(
     input: 'app.gschema.xml.in',
