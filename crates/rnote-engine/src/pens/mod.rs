@@ -5,6 +5,7 @@ pub mod penbehaviour;
 pub mod penholder;
 pub mod penmode;
 pub mod pensconfig;
+pub mod ruler;
 pub mod selector;
 pub(crate) mod shapeadjust;
 pub mod shaper;
