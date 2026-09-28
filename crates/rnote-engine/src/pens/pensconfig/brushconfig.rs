@@ -119,6 +119,9 @@ pub struct BrushConfig {
     /// to trigger recognizing it as a shape.
     #[serde(rename = "shape_recognition_delay")]
     pub shape_recognition_delay: Duration,
+    /// Whether scribbling over strokes erases them.
+    #[serde(rename = "scribble_erase_enabled")]
+    pub scribble_erase_enabled: bool,
 }
 
 impl Default for BrushConfig {
@@ -131,6 +134,7 @@ impl Default for BrushConfig {
             textured_options: TexturedOptions::default(),
             shape_recognition_enabled: true,
             shape_recognition_delay: Self::SHAPE_RECOGNITION_DELAY_DEFAULT,
+            scribble_erase_enabled: false,
         }
     }
 }

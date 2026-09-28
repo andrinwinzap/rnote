@@ -22,6 +22,7 @@ use rnote_compose::builders::{
 use rnote_compose::eventresult::{EventPropagation, EventResult};
 use rnote_compose::penevent::{PenEvent, PenProgress};
 use rnote_compose::penpath::{Element, Segment};
+use rnote_compose::scribblerecognition;
 use rnote_compose::shaperecognition;
 use rnote_compose::shapes::Shape;
 use std::time::{Duration, Instant};
@@ -206,12 +207,16 @@ impl PenBehaviour for Brush {
                 engine_view
                     .store
                     .update_geometry_for_stroke(*current_stroke_key);
-                engine_view.store.regenerate_rendering_for_stroke_threaded(
-                    engine_view.tasks_tx.clone(),
-                    *current_stroke_key,
-                    engine_view.camera.viewport(),
-                    engine_view.camera.image_scale(),
-                );
+                let (erased, wf) = erase_with_scribble(*current_stroke_key, engine_view);
+                widget_flags |= wf;
+                if !erased {
+                    engine_view.store.regenerate_rendering_for_stroke_threaded(
+                        engine_view.tasks_tx.clone(),
+                        *current_stroke_key,
+                        engine_view.camera.viewport(),
+                        engine_view.camera.image_scale(),
+                    );
+                }
                 widget_flags |= engine_view
                     .document
                     .resize_autoexpand(engine_view.store, engine_view.camera);
@@ -345,12 +350,16 @@ impl PenBehaviour for Brush {
                         engine_view
                             .store
                             .update_geometry_for_stroke(*current_stroke_key);
-                        engine_view.store.regenerate_rendering_for_stroke_threaded(
-                            engine_view.tasks_tx.clone(),
-                            *current_stroke_key,
-                            engine_view.camera.viewport(),
-                            engine_view.camera.image_scale(),
-                        );
+                        let (erased, wf) = erase_with_scribble(*current_stroke_key, engine_view);
+                        widget_flags |= wf;
+                        if !erased {
+                            engine_view.store.regenerate_rendering_for_stroke_threaded(
+                                engine_view.tasks_tx.clone(),
+                                *current_stroke_key,
+                                engine_view.camera.viewport(),
+                                engine_view.camera.image_scale(),
+                            );
+                        }
                         widget_flags |= engine_view
                             .document
                             .resize_autoexpand(engine_view.store, engine_view.camera);
@@ -652,6 +661,52 @@ fn reset_hold_task(
         tasks_tx.send(EngineTask::BrushRecognizeShape);
     };
     *handle = Some(OneOffTaskHandle::new(hold_task, hold_duration));
+}
+
+/// Erase the strokes a finished stroke was scribbled over.
+///
+/// When the stroke is the gesture of scratching something out and it actually went over strokes,
+/// those strokes and the scribble itself are trashed. A scribble over empty space stays the stroke
+/// it is, so that scratching in the margin still draws.
+///
+/// Returns whether the stroke erased anything, in which case it is gone from the store.
+fn erase_with_scribble(
+    stroke_key: StrokeKey,
+    engine_view: &mut EngineViewMut,
+) -> (bool, WidgetFlags) {
+    let mut widget_flags = WidgetFlags::default();
+
+    if !engine_view
+        .config
+        .pens_config
+        .brush_config
+        .scribble_erase_enabled
+    {
+        return (false, widget_flags);
+    }
+    let is_scribble = match engine_view.store.get_stroke_ref(stroke_key) {
+        Some(Stroke::BrushStroke(brushstroke)) => {
+            scribblerecognition::is_scribble(&brushstroke.path, engine_view.camera.total_zoom())
+        }
+        _ => false,
+    };
+    if !is_scribble {
+        return (false, widget_flags);
+    }
+
+    let (trashed, wf) = engine_view
+        .store
+        .trash_strokes_hit_by(stroke_key, engine_view.camera.viewport());
+    widget_flags |= wf;
+    if trashed == 0 {
+        return (false, widget_flags);
+    }
+
+    engine_view.store.remove_stroke(stroke_key);
+    widget_flags.store_modified = true;
+    widget_flags.redraw = true;
+
+    (true, widget_flags)
 }
 
 fn new_builder(

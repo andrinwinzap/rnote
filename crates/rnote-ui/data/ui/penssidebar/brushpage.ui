@@ -228,6 +228,18 @@ Results in the best looking handwriting.</property>
             </object>
           </child>
           <child>
+            <!-- Scribble erase -->
+            <object class="AdwPreferencesGroup">
+              <property name="title" translatable="yes">Scratch to Erase</property>
+              <child>
+                <object class="AdwSwitchRow" id="scribbleerase_row">
+                  <property name="title" translatable="yes">Scratch to Erase</property>
+                  <property name="subtitle" translatable="yes">Scribble back and forth over strokes to erase them</property>
+                </object>
+              </child>
+            </object>
+          </child>
+          <child>
             <!-- Solid options -->
             <object class="AdwPreferencesGroup">
               <property name="title" translatable="yes">Solid Style</property>

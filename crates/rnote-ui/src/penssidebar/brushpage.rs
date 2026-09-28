@@ -52,6 +52,8 @@ mod imp {
         #[template_child]
         pub(crate) shaperecognition_delay_row: TemplateChild<adw::SpinRow>,
         #[template_child]
+        pub(crate) scribbleerase_row: TemplateChild<adw::SwitchRow>,
+        #[template_child]
         pub(crate) solidstyle_pressure_curves_row: TemplateChild<adw::ComboRow>,
         #[template_child]
         pub(crate) texturedstyle_density_row: TemplateChild<adw::SpinRow>,
@@ -410,6 +412,20 @@ impl RnBrushPage {
             }
         ));
 
+        // Scratch to erase
+        imp.scribbleerase_row.connect_active_notify(clone!(
+            #[weak]
+            appwindow,
+            move |row| {
+                appwindow
+                    .engine_config()
+                    .write()
+                    .pens_config
+                    .brush_config
+                    .scribble_erase_enabled = row.is_active();
+            }
+        ));
+
         // Solid style
         // Pressure curve
         imp.solidstyle_pressure_curves_row
@@ -496,6 +512,8 @@ impl RnBrushPage {
             .set_sensitive(brush_config.shape_recognition_enabled);
         imp.shaperecognition_delay_row
             .set_value(brush_config.shape_recognition_delay.as_secs_f64());
+        imp.scribbleerase_row
+            .set_active(brush_config.scribble_erase_enabled);
 
         match brush_config.style {
             BrushStyle::Marker => {

@@ -120,6 +120,63 @@ impl StrokeStore {
         widget_flags
     }
 
+    /// Trash the strokes that the stroke with the given key was drawn over.
+    ///
+    /// Used for the scribble gesture: the strokes the scribble actually went over are trashed, not
+    /// everything inside its bounds, so scratching out a word between two others only takes that
+    /// word. Returns how many strokes were trashed.
+    pub(crate) fn trash_strokes_hit_by(
+        &mut self,
+        key: StrokeKey,
+        viewport: Aabb,
+    ) -> (usize, WidgetFlags) {
+        let mut widget_flags = WidgetFlags::default();
+
+        let Some(hitting_stroke) = self.stroke_components.get(key) else {
+            return (0, widget_flags);
+        };
+        let hitting_bounds = hitting_stroke.bounds();
+        let hitting_hitboxes = hitting_stroke.hitboxes();
+
+        let hit_keys = self
+            .stroke_keys_as_rendered_intersecting_bounds(viewport)
+            .into_iter()
+            .filter(|k| *k != key)
+            .filter(|k| {
+                let Some(stroke) = self.stroke_components.get(*k) else {
+                    return false;
+                };
+                match stroke.as_ref() {
+                    Stroke::BrushStroke(_) | Stroke::ShapeStroke(_) => {}
+                    // Ignore the same strokes the eraser ignores.
+                    Stroke::TextStroke(_) | Stroke::VectorImage(_) | Stroke::BitmapImage(_) => {
+                        return false;
+                    }
+                }
+                // First check the bounds, avoiding unnecessary work
+                if !hitting_bounds.intersects(&stroke.bounds()) {
+                    return false;
+                }
+
+                stroke.hitboxes().into_iter().any(|hitbox| {
+                    hitting_hitboxes
+                        .iter()
+                        .any(|hitting_hitbox| hitting_hitbox.intersects(&hitbox))
+                })
+            })
+            .collect::<Vec<StrokeKey>>();
+
+        for hit_key in hit_keys.iter() {
+            self.set_trashed(*hit_key, true);
+        }
+        if !hit_keys.is_empty() {
+            widget_flags.store_modified = true;
+            widget_flags.resize = true;
+        }
+
+        (hit_keys.len(), widget_flags)
+    }
+
     /// Remove colliding stroke segments with the given bounds.
     /// The stroke is then split. Strokes that don't have segments are trashed completely.
     ///
@@ -248,5 +305,51 @@ impl StrokeStore {
         }
 
         (modified_keys, widget_flags)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p2d::math::Vector2;
+    use rnote_compose::Style;
+    use rnote_compose::penpath::Element;
+    use rnote_compose::style::smooth::SmoothOptions;
+
+    /// Insert a horizontal stroke at the given height, reaching from `x_start` to `x_end`.
+    fn insert_line(store: &mut StrokeStore, y: f64, x_start: f64, x_end: f64) -> StrokeKey {
+        let path = PenPath::try_from_elements(
+            [x_start, x_end]
+                .into_iter()
+                .map(|x| Element::new(Vector2::new(x, y), 0.5)),
+        )
+        .unwrap();
+        let key = store.insert_stroke(
+            Stroke::BrushStroke(BrushStroke::from_penpath(
+                path,
+                Style::Smooth(SmoothOptions::default()),
+            )),
+            None,
+        );
+        store.update_geometry_for_stroke(key);
+
+        key
+    }
+
+    #[test]
+    fn trashes_only_the_strokes_that_were_scribbled_over() {
+        let mut store = StrokeStore::default();
+        let scribbled_over = insert_line(&mut store, 100.0, 100.0, 200.0);
+        let untouched = insert_line(&mut store, 400.0, 100.0, 200.0);
+        let scribble = insert_line(&mut store, 100.0, 120.0, 180.0);
+        let viewport = Aabb::new(Vector2::new(-500.0, -500.0), Vector2::new(1000.0, 1000.0));
+
+        let (trashed, _) = store.trash_strokes_hit_by(scribble, viewport);
+
+        assert_eq!(trashed, 1);
+        assert_eq!(store.trashed(scribbled_over), Some(true));
+        assert_eq!(store.trashed(untouched), Some(false));
+        // The scribble itself is left to the caller, which removes it.
+        assert_eq!(store.trashed(scribble), Some(false));
     }
 }

@@ -19,6 +19,8 @@ pub mod ext;
 pub mod penevent;
 /// module for pen paths
 pub mod penpath;
+/// module for recognizing the scribble gesture
+pub mod scribblerecognition;
 /// utilities for serializing / deserializing
 pub mod serialize;
 /// module for recognizing geometric shapes in drawn pen paths
