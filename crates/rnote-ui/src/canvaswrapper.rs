@@ -714,7 +714,18 @@ mod imp {
                     drag_mode,
                     #[weak(rename_to=canvaswrapper)]
                     obj,
-                    move |_, x, y| {
+                    move |gesture, x, y| {
+                        // Stylus hover can trigger drag events; ignore pans without pressure.
+                        if let Some(event) = gesture.current_event()
+                            && event.device_tool().is_some()
+                        {
+                            let pressure = event.axis(gdk::AxisUse::Pressure);
+                            if pressure.is_some_and(|p| p <= 0.0) {
+                                gesture.set_state(EventSequenceState::Denied);
+                                return;
+                            }
+                        }
+
                         // We don't claim the sequence — the zoom gesture (Capture phase)
                         // needs both touch sequences when a second finger lands, so
                         // claiming here would break two-finger ruler rotation.
@@ -804,7 +815,18 @@ mod imp {
                         mouse_drag_start,
                         #[weak(rename_to=canvaswrapper)]
                         obj,
-                        move |_, _, _| {
+                        move |gesture, _, _| {
+                            // Stylus hover can trigger button events; ignore pan without pressure.
+                            if let Some(event) = gesture.current_event()
+                                && event.device_tool().is_some()
+                            {
+                                let pressure = event.axis(gdk::AxisUse::Pressure);
+                                if pressure.is_some_and(|p| p <= 0.0) {
+                                    gesture.set_state(EventSequenceState::Denied);
+                                    return;
+                                }
+                            }
+
                             mouse_drag_start
                                 .set(canvaswrapper.canvas().engine_ref().camera.offset());
                         }

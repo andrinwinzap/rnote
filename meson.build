@@ -28,7 +28,7 @@ app_website = 'https://rnote.flxzt.net'
 app_repo_url = 'https://github.com/flxzt/rnote'
 app_issues_url = 'https://github.com/flxzt/rnote/issues'
 app_support_url = 'https://github.com/flxzt/rnote/discussions'
-app_donate_url = 'https://rnote.flxzt.net/donate/'
+app_donate_url = 'https://rnote.flxzt.net/#support'
 app_author_name = 'Felix Zwettler'
 app_authors = run_command(
     'cat',
@@ -206,7 +206,7 @@ if build_ui == true
             cargo_build_script,
             meson.project_build_root(),
             meson.project_source_root(),
-            cargo_env,
+            ' '.join(cargo_env),
             cargo,
             ' '.join(ui_cargo_options),
             cargo_target_dir / rust_target_folder / app_name,
@@ -261,7 +261,22 @@ if build_ui == true
         configuration: inno_script_conf,
     )
 
+    if build_cli and host_machine.system() == 'windows'
+        define_cli_output = '/DMyAppCliExeName=' + cli_name + '.exe'
+    else
+        define_cli_output = ''
+    endif
+
     if host_machine.system() == 'windows'
+        # the inno_build_script build script will
+        # package the cli if its name is provided
+        # so only give the name if the cli is
+        # actually built
+        if build_cli
+            package_cli_name = cli_name
+        else
+            package_cli_name = ''
+        endif
         # build installer
         custom_target(
             'build-installer',
@@ -277,6 +292,7 @@ if build_ui == true
                 app_id,
                 ui_output,
                 meson.project_build_root() / '@INPUT@',
+                package_cli_name,
             ],
             build_by_default: false,
             depends: app_cargo_build,
