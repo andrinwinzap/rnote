@@ -21,6 +21,7 @@ rnote_compose_sources = files(
     'penpath/element.rs',
     'penpath/mod.rs',
     'penpath/segment.rs',
+    'scribblerecognition/mod.rs',
     'shapes/arrow.rs',
     'shapes/cubbez.rs',
     'shapes/ellipse.rs',

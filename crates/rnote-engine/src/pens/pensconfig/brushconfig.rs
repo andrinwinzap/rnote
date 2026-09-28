@@ -110,6 +110,9 @@ pub struct BrushConfig {
     pub solid_options: SolidOptions,
     #[serde(rename = "textured_options")]
     pub textured_options: TexturedOptions,
+    /// Whether scribbling over strokes erases them.
+    #[serde(rename = "scribble_erase_enabled")]
+    pub scribble_erase_enabled: bool,
 }
 
 impl BrushConfig {
