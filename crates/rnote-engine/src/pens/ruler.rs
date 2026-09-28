@@ -13,8 +13,6 @@ const INDICATOR_COLOR: piet::Color = color::GNOME_REDS[2];
 
 /// Font size of the angle text, in surface pixels (constant on-screen).
 const ANGLE_TEXT_SIZE_PX: f64 = 14.0;
-/// Outer radius of the angle dial, in surface pixels (constant on-screen).
-const DIAL_OUTER_RADIUS_PX: f64 = 32.0;
 /// Length of dial minor ticks, in surface pixels.
 const DIAL_MINOR_TICK_LEN_PX: f64 = 4.0;
 /// Length of dial major ticks, in surface pixels.
@@ -163,7 +161,7 @@ fn draw_angle_dial(
     total_zoom: f64,
     dark_mode: bool,
 ) -> anyhow::Result<()> {
-    let outer_r = DIAL_OUTER_RADIUS_PX / total_zoom;
+    let outer_r = RulerConfig::DIAL_OUTER_RADIUS_PX / total_zoom;
     let minor_len = DIAL_MINOR_TICK_LEN_PX / total_zoom;
     let major_len = DIAL_MAJOR_TICK_LEN_PX / total_zoom;
     let tick_w = 1.0 / total_zoom;

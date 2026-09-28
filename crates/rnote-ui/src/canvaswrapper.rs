@@ -11,6 +11,7 @@ use p2d::math::Vector2;
 use rnote_compose::penevent::ShortcutKey;
 use rnote_engine::Camera;
 use rnote_engine::ext::GraphenePointExt;
+use rnote_engine::pens::pensconfig::rulerconfig::RulerTurn;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -26,6 +27,11 @@ struct RulerDragBegin {
     anchor_begin: Vector2,
     centroid_begin: Vector2,
     angle_begin: f64,
+    /// The turn so far, which decides whether the ruler is held at a common angle.
+    turn: RulerTurn,
+    /// The angle the gesture had turned by at the last update, to get at the turn since it.
+    /// The gesture itself reports the angle since it began.
+    last_gesture_angle: f64,
 }
 
 /// How long after the last scroll event a session stays "active" (= the pivot
@@ -200,7 +206,13 @@ fn rotate_ruler_with_scroll(
 ///
 /// On placement (`translation = 0`, `angle_delta = 0`) nothing moves except
 /// `dial_pos`, which is `pivot` (set in the begin handler).
-fn apply_two_finger_ruler_update(canvaswrapper: &RnCanvasWrapper, begin: RulerDragBegin) {
+fn apply_two_finger_ruler_update(
+    canvaswrapper: &RnCanvasWrapper,
+    ruler_drag: &Rc<Cell<Option<RulerDragBegin>>>,
+) {
+    let Some(mut begin) = ruler_drag.get() else {
+        return;
+    };
     let canvas = canvaswrapper.canvas();
     let zoom_gesture = &canvaswrapper.imp().canvas_zoom_gesture;
     let rotate_gesture = &canvaswrapper.imp().canvas_rotate_gesture;
@@ -212,24 +224,17 @@ fn apply_two_finger_ruler_update(canvaswrapper: &RnCanvasWrapper, begin: RulerDr
     let translation = centroid_now - begin.centroid_begin;
 
     let angle_delta = rotate_gesture.angle_delta();
-    let raw_new_angle = begin.angle_begin + angle_delta;
     let config_shared = canvas.engine_ref().engine_config().clone();
-    let new_angle = if config_shared
-        .read()
-        .pens_config
-        .brush_config
-        .ruler_config
-        .angle_snap_enabled
-    {
-        // Use hysteresis against the angle at gesture begin: once the user has
-        // moved into a snap, finger jitter shouldn't keep them locked there.
-        rnote_engine::pens::pensconfig::rulerconfig::RulerConfig::snap_angle_hysteretic(
-            raw_new_angle,
-            begin.angle_begin,
-        )
-    } else {
-        raw_new_angle
+    // Turning quickly is held at the common angles, turning slowly is not, so that the angles
+    // right next to them stay reachable.
+    let new_angle = {
+        let config = config_shared.read();
+        let ruler = &config.pens_config.brush_config.ruler_config;
+        begin
+            .turn
+            .update(ruler, angle_delta - begin.last_gesture_angle)
     };
+    begin.last_gesture_angle = angle_delta;
     // The rotation applied to the anchor's offset-from-pivot uses the EFFECTIVE
     // angular change (after snap), not the raw gesture delta, so the anchor
     // tracks the snapped ruler line.
@@ -248,6 +253,7 @@ fn apply_two_finger_ruler_update(canvaswrapper: &RnCanvasWrapper, begin: RulerDr
         r.dial_pos = new_dial_pos;
         r.angle = new_angle;
     }
+    ruler_drag.set(Some(begin));
     canvas.queue_draw();
 }
 
@@ -947,6 +953,8 @@ mod imp {
                                     anchor_begin: anchor_at_begin,
                                     centroid_begin: bbcenter,
                                     angle_begin,
+                                    turn: RulerTurn::new(angle_begin),
+                                    last_gesture_angle: 0.0,
                                 }));
                             }
                         }
@@ -974,8 +982,8 @@ mod imp {
                         // When a two-finger gesture begins on the ruler, suppress canvas
                         // zoom and apply the combined translate + rotate around the
                         // (live) centroid to the ruler.
-                        if let Some(begin) = ruler_drag.get() {
-                            apply_two_finger_ruler_update(&canvaswrapper, begin);
+                        if ruler_drag.get().is_some() {
+                            apply_two_finger_ruler_update(&canvaswrapper, &ruler_drag);
                             return;
                         }
 
@@ -1017,10 +1025,10 @@ mod imp {
                     #[weak(rename_to=canvaswrapper)]
                     obj,
                     move |_gesture, _angle, _angle_delta| {
-                        let Some(begin) = ruler_drag.get() else {
+                        let Some(_) = ruler_drag.get() else {
                             return;
                         };
-                        apply_two_finger_ruler_update(&canvaswrapper, begin);
+                        apply_two_finger_ruler_update(&canvaswrapper, &ruler_drag);
                     }
                 ));
 

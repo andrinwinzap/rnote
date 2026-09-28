@@ -40,6 +40,47 @@ impl RulerView {
     }
 }
 
+/// Turning the ruler, with the pen on its angle dial or with two fingers.
+///
+/// The turn itself is kept apart from the angle the ruler shows, because the common angles draw the
+/// ruler in: around them the ruler answers a turn with a smaller change than the turn itself, and
+/// right at them it does not move at all.
+#[derive(Clone, Copy, Debug)]
+pub struct RulerTurn {
+    /// The angle the turn has reached, which the common angles are applied to.
+    raw_angle: f64,
+    /// The angle the ruler is showing.
+    angle: f64,
+}
+
+impl RulerTurn {
+    /// Start turning a ruler that is currently at `angle`.
+    pub fn new(angle: f64) -> Self {
+        Self {
+            raw_angle: angle,
+            angle,
+        }
+    }
+
+    /// The angle the ruler is showing.
+    pub fn angle(&self) -> f64 {
+        self.angle
+    }
+
+    /// Turn by `delta` radians, and return the angle the ruler takes.
+    pub fn update(&mut self, ruler: &RulerConfig, delta: f64) -> f64 {
+        self.raw_angle += delta;
+        self.angle = ruler.attract_angle(self.raw_angle);
+
+        self.angle
+    }
+
+    /// Turn by a drag of `drag` surface pixels of the pen inside the angle dial.
+    pub fn update_from_drag(&mut self, ruler: &RulerConfig, drag: f64) -> f64 {
+        self.update(ruler, drag * RulerConfig::dial_radians_per_pixel())
+    }
+}
+
 /// Configuration and runtime state for the on-canvas ruler.
 ///
 /// The ruler is a translucent straight-edge spanning the viewport. Position is
@@ -128,8 +169,20 @@ impl RulerConfig {
     pub const SCROLL_ROTATION_STEP_DEG_MAX: f64 = 15.0;
     /// Length of major tick marks in surface pixels.
     pub const TICK_MAJOR_LEN_PX: f64 = 14.0;
+    /// Outer radius of the angle dial, in surface pixels (constant on-screen size).
+    pub const DIAL_OUTER_RADIUS_PX: f64 = 32.0;
+    /// How far the ruler turns per surface pixel the pen is dragged up or down inside the dial.
+    pub const DIAL_DEG_PER_PIXEL: f64 = 0.4;
     /// Length of minor tick marks in surface pixels.
     pub const TICK_MINOR_LEN_PX: f64 = 7.0;
+    /// How far from a common angle (0, ±45 and ±90 degrees) the ruler starts being drawn towards
+    /// it.
+    pub const ANGLE_SNAP_ZONE_DEG: f64 = 6.0;
+    /// How close to a common angle the ruler sits exactly on it.
+    ///
+    /// Only the angles within this of a common one cannot be set, and at a fraction of a degree
+    /// that is far finer than anything that can be told apart on the ruler.
+    pub const ANGLE_SNAP_PIN_DEG: f64 = 0.75;
     /// Half-width of the snap-to-angle window, in degrees, when *approaching*
     /// a target. Within this many degrees of `0`, `±45`, or `±90`, the angle
     /// gets pulled in to the target.
@@ -234,6 +287,72 @@ impl RulerConfig {
         }
 
         self.perp_distance(window_pos).abs() <= self.body_half_width
+    }
+
+    /// Whether `window_pos` (in window coordinates) lies inside the angle dial, the knob that
+    /// rotates the ruler. Always false while the dial is not shown.
+    pub fn hit_dial_window(&self, window_pos: Vector2) -> bool {
+        if !self.visible || !self.show_dial {
+            return false;
+        }
+
+        (window_pos - self.dial_pos).length() <= Self::DIAL_OUTER_RADIUS_PX
+    }
+
+    /// Whether `pos_doc` (in document coordinates) lies inside the angle dial.
+    pub fn hit_dial(&self, pos_doc: Vector2, view: RulerView) -> bool {
+        self.hit_dial_window(view.from_doc(pos_doc))
+    }
+
+    /// The angle (in radians) the ruler turns per surface pixel the pen is dragged inside the dial.
+    ///
+    /// Dragging down turns the ruler clockwise, the same way scrolling down does.
+    pub fn dial_radians_per_pixel() -> f64 {
+        Self::DIAL_DEG_PER_PIXEL.to_radians()
+    }
+
+    /// Draw an angle towards the common angles (0, ±45 and ±90 degrees).
+    ///
+    /// The ruler sits exactly on a common angle while it is turned to within a fraction of a degree
+    /// of it, and around that it is drawn in ever more strongly the closer it gets, so that turning
+    /// past a common angle has to be meant. At the edge of the zone the pull is gone, so nothing
+    /// ever jumps.
+    ///
+    /// Being drawn in is not the same as being stuck: the angles next to a common one are set by
+    /// turning further than they are, since the turn near a common angle is answered with a much
+    /// smaller change of the ruler. Two degrees off 90 is three and a half degrees of turning.
+    pub fn attract_angle(&self, angle_rad: f64) -> f64 {
+        const TARGETS_DEG: [f64; 5] = [-90.0, -45.0, 0.0, 45.0, 90.0];
+
+        if !self.angle_snap_enabled {
+            return angle_rad;
+        }
+        let normalized_deg = Self::normalize_angle(angle_rad).to_degrees();
+        let Some(distance_deg) = TARGETS_DEG
+            .iter()
+            .map(|target| normalized_deg - target)
+            .min_by(|a, b| a.abs().total_cmp(&b.abs()))
+        else {
+            return angle_rad;
+        };
+        if distance_deg.abs() >= Self::ANGLE_SNAP_ZONE_DEG {
+            return angle_rad;
+        }
+        // Zero at the pin, where the ruler sits on the common angle, and one at the edge of the
+        // zone, where the turn is left alone.
+        let pulled_in = ((distance_deg.abs() - Self::ANGLE_SNAP_PIN_DEG)
+            / (Self::ANGLE_SNAP_ZONE_DEG - Self::ANGLE_SNAP_PIN_DEG))
+            .clamp(0.0, 1.0);
+        // The angle grows against the normalized one, so what is left of the distance is taken off.
+        angle_rad + distance_deg.to_radians() * (1.0 - pulled_in * pulled_in)
+    }
+
+    /// Rotate a position around the pivot by the given angle, both in the same coordinate space.
+    pub fn rotate_around(pos: Vector2, pivot: Vector2, angle: f64) -> Vector2 {
+        let v = pos - pivot;
+        let (sin, cos) = angle.sin_cos();
+
+        pivot + Vector2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
     }
 
     /// If `pos_doc` lies within the snap zone of one of the ruler's long
@@ -399,6 +518,165 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_dial_is_grabbed_at_the_same_screen_size() {
+        let ruler = horizontal_ruler();
+        // Just inside and just outside the dial on screen, at any zoom and canvas position.
+        let inside = ruler.dial_pos + Vector2::new(0.0, 30.0);
+        let outside = ruler.dial_pos + Vector2::new(0.0, 34.0);
+
+        for total_zoom in [0.2, 1.0, 6.0] {
+            let view = view(total_zoom, Vector2::new(180.0, 40.0));
+            assert!(
+                ruler.hit_dial(view.to_doc(inside), view),
+                "zoom {total_zoom}"
+            );
+            assert!(
+                !ruler.hit_dial(view.to_doc(outside), view),
+                "zoom {total_zoom}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hidden_dial_is_not_grabbed() {
+        let ruler = RulerConfig {
+            show_dial: false,
+            ..horizontal_ruler()
+        };
+
+        assert!(!ruler.hit_dial_window(ruler.dial_pos));
+    }
+
+    /// Turn the ruler by `degrees` per step and report every angle it showed.
+    fn turn(ruler: &RulerConfig, from: f64, degrees: f64, steps: usize) -> Vec<f64> {
+        let mut turn = RulerTurn::new(from.to_radians());
+
+        (0..steps)
+            .map(|_| turn.update(ruler, degrees.to_radians()).to_degrees())
+            .collect()
+    }
+
+    /// How close the turn got to the wanted angle.
+    fn closest_to(angles: &[f64], wanted: f64) -> f64 {
+        angles
+            .iter()
+            .map(|angle| (angle - wanted).abs())
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    #[test]
+    fn dragging_down_turns_clockwise() {
+        // The stored angle grows clockwise, and a downwards drag is a positive one, the same way
+        // scrolling down turns the ruler.
+        assert!(RulerConfig::dial_radians_per_pixel() > 0.0);
+    }
+
+    #[test]
+    fn the_ruler_sits_exactly_on_a_common_angle() {
+        let ruler = horizontal_ruler();
+
+        for degrees in [90.0f64, 89.5, 90.5, 45.0, 0.0] {
+            let angle = ruler.attract_angle(degrees.to_radians()).to_degrees();
+            let nearest = [0.0f64, 45.0, 90.0]
+                .into_iter()
+                .min_by(|a, b| (a - degrees).abs().total_cmp(&(b - degrees).abs()))
+                .unwrap();
+            assert!(
+                (angle - nearest).abs() < 1e-9,
+                "{degrees} degrees should sit on {nearest}, got {angle}"
+            );
+        }
+    }
+
+    #[test]
+    fn turning_next_to_a_common_angle_barely_moves_the_ruler() {
+        let ruler = horizontal_ruler();
+
+        // Four degrees of turning across 90 degrees, which without the pull would be four degrees
+        // of ruler, comes out as a fraction of a degree. This is what holds the ruler in place.
+        let below = ruler.attract_angle(88f64.to_radians()).to_degrees();
+        let above = ruler.attract_angle(92f64.to_radians()).to_degrees();
+
+        assert!(
+            above - below < 1.0,
+            "expected the ruler to be held, went from {below} to {above}"
+        );
+    }
+
+    #[test]
+    fn the_angles_next_to_a_common_one_are_reachable() {
+        let ruler = horizontal_ruler();
+
+        // Turning through the zone in small steps, as a hand does.
+        let angles = turn(&ruler, 84.0, 0.05, 240);
+
+        for wanted in [88.0, 89.0, 91.0, 92.0] {
+            let closest = closest_to(&angles, wanted);
+            assert!(
+                closest < 0.1,
+                "closest to {wanted} degrees was {closest} off"
+            );
+        }
+    }
+
+    #[test]
+    fn the_pull_reaches_as_far_as_its_zone_and_no_further() {
+        let ruler = horizontal_ruler();
+        let outside = 90.0 - RulerConfig::ANGLE_SNAP_ZONE_DEG - 0.5;
+        let inside = 90.0 - RulerConfig::ANGLE_SNAP_ZONE_DEG + 0.5;
+
+        let left_alone = ruler.attract_angle(outside.to_radians()).to_degrees();
+        let drawn_in = ruler.attract_angle(inside.to_radians()).to_degrees();
+
+        assert!((left_alone - outside).abs() < 1e-9);
+        assert!(
+            drawn_in > inside,
+            "{inside} should be drawn towards 90, got {drawn_in}"
+        );
+    }
+
+    #[test]
+    fn the_pull_does_not_jump_anywhere() {
+        let ruler = horizontal_ruler();
+
+        // Turning in even steps must never move the ruler by more than the zone is wide, and in
+        // particular not jump when the zone is entered or left.
+        let angles = turn(&ruler, 80.0, 0.1, 200);
+        let biggest_step = angles
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f64::max);
+
+        assert!(
+            biggest_step < 0.5,
+            "the ruler jumped by {biggest_step} degrees"
+        );
+    }
+
+    #[test]
+    fn nothing_is_pulled_when_the_snap_is_off() {
+        let ruler = RulerConfig {
+            angle_snap_enabled: false,
+            ..horizontal_ruler()
+        };
+        let raw = 89f64.to_radians();
+
+        assert!((ruler.attract_angle(raw) - raw).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rotating_the_anchor_keeps_it_around_the_dial() {
+        let ruler = horizontal_ruler();
+        let anchor = ruler.anchor + Vector2::new(80.0, 0.0);
+        let angle = std::f64::consts::FRAC_PI_2;
+
+        let rotated = RulerConfig::rotate_around(anchor, ruler.dial_pos, angle);
+
+        // A quarter turn clockwise on screen: the point to the right ends up below the dial.
+        assert!((rotated - (ruler.dial_pos + Vector2::new(0.0, 80.0))).length() < 1e-9);
     }
 
     #[test]

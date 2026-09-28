@@ -2,7 +2,7 @@
 use super::PenBehaviour;
 use super::PenStyle;
 use super::pensconfig::brushconfig::BrushStyle;
-use super::pensconfig::rulerconfig::RulerView;
+use super::pensconfig::rulerconfig::{RulerConfig, RulerTurn, RulerView};
 use crate::engine::{EngineView, EngineViewMut};
 use crate::store::StrokeKey;
 use crate::strokes::BrushStroke;
@@ -39,6 +39,18 @@ enum BrushState {
         anchor_begin: Vector2,
         dial_pos_begin: Vector2,
         start_pos: Vector2,
+    },
+    /// The pen went down on the angle dial and turns the ruler while it is dragged up and down.
+    RotatingRuler {
+        /// The dial position, which the ruler turns around and which stays where it is.
+        pivot: Vector2,
+        /// The anchor and angle the ruler had when the drag began, which the turn is applied to.
+        anchor_begin: Vector2,
+        angle_begin: f64,
+        /// The turn itself, which follows how far and how fast the pen is moved.
+        turn: RulerTurn,
+        /// The position of the last event, to measure the movement since it.
+        last_pos: Vector2,
     },
 }
 
@@ -84,8 +96,27 @@ impl PenBehaviour for Brush {
         let ruler_view = RulerView::from_camera(engine_view.camera);
         let event_result = match (&mut self.state, event) {
             (BrushState::Idle, PenEvent::Down { mut element, .. }) => {
-                // If the input lands on the ruler body, drag the ruler instead of drawing.
+                // If the input lands on the ruler, move it instead of drawing: on its angle dial
+                // it turns the ruler, anywhere else on its body it drags the ruler along.
                 let ruler = &engine_view.config.pens_config.brush_config.ruler_config;
+                if ruler.hit_dial(element.pos, ruler_view) {
+                    self.state = BrushState::RotatingRuler {
+                        pivot: ruler.dial_pos,
+                        anchor_begin: ruler.anchor,
+                        angle_begin: ruler.angle,
+                        turn: RulerTurn::new(ruler.angle),
+                        last_pos: element.pos,
+                    };
+                    widget_flags.redraw = true;
+                    return (
+                        EventResult {
+                            handled: true,
+                            propagate: EventPropagation::Stop,
+                            progress: PenProgress::InProgress,
+                        },
+                        widget_flags,
+                    );
+                }
                 if ruler.visible && ruler.hit_body(element.pos, ruler_view) {
                     self.state = BrushState::DraggingRuler {
                         anchor_begin: ruler.anchor,
@@ -210,6 +241,48 @@ impl PenBehaviour for Brush {
                     progress: PenProgress::InProgress,
                 }
             }
+            (
+                BrushState::RotatingRuler {
+                    pivot,
+                    anchor_begin,
+                    angle_begin,
+                    turn,
+                    last_pos,
+                },
+                PenEvent::Down { element, .. },
+            ) => {
+                // Only the vertical part of the drag turns the ruler, in surface pixels.
+                let drag_y = (element.pos.y - last_pos.y) * total_zoom;
+                *last_pos = element.pos;
+
+                let ruler = &mut engine_view.config.pens_config.brush_config.ruler_config;
+                let angle = turn.update_from_drag(ruler, drag_y);
+                ruler.anchor =
+                    RulerConfig::rotate_around(*anchor_begin, *pivot, angle - *angle_begin);
+                ruler.angle = angle;
+                widget_flags.redraw = true;
+
+                EventResult {
+                    handled: true,
+                    propagate: EventPropagation::Stop,
+                    progress: PenProgress::InProgress,
+                }
+            }
+            (BrushState::RotatingRuler { .. }, PenEvent::Up { .. } | PenEvent::Cancel) => {
+                self.state = BrushState::Idle;
+                widget_flags.redraw = true;
+
+                EventResult {
+                    handled: true,
+                    propagate: EventPropagation::Stop,
+                    progress: PenProgress::Finished,
+                }
+            }
+            (BrushState::RotatingRuler { .. }, _) => EventResult {
+                handled: true,
+                propagate: EventPropagation::Stop,
+                progress: PenProgress::InProgress,
+            },
             (BrushState::DraggingRuler { .. }, PenEvent::Up { .. } | PenEvent::Cancel) => {
                 self.state = BrushState::Idle;
                 widget_flags.redraw = true;
@@ -415,7 +488,7 @@ impl DrawableOnDoc for Brush {
 
         match &self.state {
             BrushState::Idle => None,
-            BrushState::DraggingRuler { .. } => None,
+            BrushState::DraggingRuler { .. } | BrushState::RotatingRuler { .. } => None,
             BrushState::Drawing { path_builder, .. } => {
                 path_builder.bounds(&style, engine_view.camera.zoom())
             }
@@ -430,7 +503,9 @@ impl DrawableOnDoc for Brush {
         cx.save().map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         match &self.state {
-            BrushState::Idle | BrushState::DraggingRuler { .. } => {}
+            BrushState::Idle
+            | BrushState::DraggingRuler { .. }
+            | BrushState::RotatingRuler { .. } => {}
             BrushState::Drawing {
                 path_builder,
                 preview_style,
