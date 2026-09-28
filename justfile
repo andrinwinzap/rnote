@@ -267,3 +267,24 @@ create-tarball *MESON_DIST_ARGS:
 
 generate-json-flatpak-manifest:
     yq -o=json build-aux/com.github.flxzt.rnote.Devel.yaml > build-aux/com.github.flxzt.rnote.Devel.json
+
+# Slopnote: its own flatpak build folder, so building it doesn't wipe the devel flatpak build.
+slopnote_flatpak_app_folder := "_flatpak_app_slopnote"
+
+# Slopnote: build the personal fork as a release flatpak, installed alongside upstream Rnote.
+build-slopnote:
+    flatpak-builder \
+        --user \
+        --repo={{ flatpak_repo_folder }} \
+        --force-clean \
+        {{ slopnote_flatpak_app_folder }} \
+        build-aux/ch.andrinwinzap.Slopnote.yaml
+
+# Slopnote: install (or update) the built flatpak for the current user.
+install-slopnote:
+    flatpak-builder \
+        --user \
+        --install \
+        --force-clean \
+        {{ slopnote_flatpak_app_folder }} \
+        build-aux/ch.andrinwinzap.Slopnote.yaml

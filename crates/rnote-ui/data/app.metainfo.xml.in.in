@@ -19,8 +19,12 @@
 
   <description>
     <p>
-      Rnote is a vector-based drawing app for sketching, handwritten notes and to annotate documents
-      and pictures.
+      Slopnote is a vector-based drawing app for sketching, handwritten notes and to annotate
+      documents and pictures.
+    </p>
+    <p>
+      Slopnote is a personal fork of Rnote by Felix Zwettler, with some extra features. It reads and
+      writes the same .rnote files.
     </p>
     <p>
       Disclaimer: The file format is still unstable. It might change and break compatibility between
@@ -79,7 +83,7 @@
   <url type="donation">@APP_DONATE_URL@</url>
   <url type="vcs-browser">@APP_REPO_URL@</url>
   <developer_name translatable="no">@APP_AUTHOR_NAME@</developer_name>
-  <update_contact>f.zwettler@posteo.de</update_contact>
+  <update_contact>mail@andrinwinzap.ch</update_contact>
   <content_rating type="oars-1.0" />
 
   <provides>
