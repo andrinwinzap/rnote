@@ -63,8 +63,8 @@ endif
 settings_idpath = '/' + '/'.join(app_id.split('.')) + '/'
 
 # Dependencies
-dependency('glib-2.0', version: '>= 2.76')
-dependency('gio-2.0', version: '>= 2.76')
+dependency('glib-2.0', version: '>= 2.88')
+dependency('gio-2.0', version: '>= 2.88')
 dependency('cairo', version: '>= 1.18')
 # UI/CLI specific dependencies are declared below
 
@@ -141,9 +141,9 @@ run_target(
 # build/install the ui
 if build_ui == true
     # ui dependencies
-    dependency('appstream')
-    dependency('gtk4', version: '>= 4.18')
-    dependency('libadwaita-1', version: '>= 1.7')
+    dependency('appstream', version: '>=1.0')
+    dependency('gtk4', version: '>= 4.22')
+    dependency('libadwaita-1', version: '>= 1.9')
 
     # ui crate
     subdir('crates/rnote-ui')
@@ -152,7 +152,7 @@ if build_ui == true
         rnote_compose_sources,
         rnote_engine_sources,
         rnote_ui_sources,
-        rnote_ui_gresources_files,
+        rnote_ui_data_files,
         files(
             meson.project_source_root() + '/crates/rnote-compose/Cargo.toml',
             meson.project_source_root() + '/crates/rnote-engine/Cargo.toml',
