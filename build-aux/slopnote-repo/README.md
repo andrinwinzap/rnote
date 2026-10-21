@@ -53,6 +53,21 @@ again, since a repo signed by a new key is a different repo as far as flatpak is
 
 ### 2. The server
 
+The pipeline connects in over ssh, so the server has to be reachable from the internet. A small
+cloud VM is the straightforward way; a machine on a home LAN is not, short of forwarding a port or
+putting both ends on a tunnel.
+
+On a fresh VM, two firewalls stand between the internet and the ports, and leaving the second one
+is the usual reason a server answers ssh and nothing else:
+
+- the provider's own rules - on Oracle Cloud the VCN security list or network security group -
+  which have to allow 80 and 443 in,
+- the firewall on the instance itself. Oracle's images carry iptables rules that permit ssh and
+  drop the rest, so the ports have to be opened there as well.
+
+Point an A record for the domain at the instance's public address before asking for a
+certificate.
+
 As root, with the defaults being the user `slopnote` and the directory `/srv/slopnote`:
 
 ```sh
@@ -76,11 +91,29 @@ command="rrsync /srv/slopnote",restrict ssh-ed25519 AAAA... slopnote deploy
 that one directory. The publish step runs `ln`, `mv` and `rm` over SSH as well, so either drop the
 `command=` part, or keep it and move those three into a small script the key is allowed to run.
 
-### 3. nginx and traefik
+### 3. nginx
 
 `nginx.conf` in this directory serves `/srv/slopnote` on port 8081. The only thing in it that is
 not ordinary is `disable_symlinks off`, without which nginx refuses to follow the symlink a
 publish swaps over.
+
+On a VM of its own, with nothing already terminating TLS, the shortest way is nginx serving the
+domain directly and certbot keeping the certificate:
+
+```sh
+certbot --nginx -d flatpak.example.org
+```
+
+Change `listen 8081` to `listen 80` first, and let certbot add the TLS server block. If the image
+is Oracle Linux or another distribution with SELinux enforcing, nginx is not allowed to read
+`/srv` until it is labelled for it:
+
+```sh
+semanage fcontext -a -t httpd_sys_content_t "/srv/slopnote(/.*)?"
+restorecon -Rv /srv/slopnote
+```
+
+Behind traefik instead, leave the port as it is and route to it.
 
 If nginx runs in docker behind traefik, the labels are:
 
