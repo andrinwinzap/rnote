@@ -15,6 +15,7 @@ use rnote_engine::pens::pensconfig::rulerconfig::RulerTurn;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
+use tracing::debug;
 
 /// State recorded at the start of a two-finger ruler gesture. The rotation
 /// pivot (projected centroid) is fixed for the duration of the gesture; the
@@ -32,6 +33,8 @@ struct RulerDragBegin {
     /// The angle the gesture had turned by at the last update, to get at the turn since it.
     /// The gesture itself reports the angle since it began.
     last_gesture_angle: f64,
+    /// When the ruler was last updated, for logging how often the gesture reports.
+    last_update: Instant,
 }
 
 /// How long after the last scroll event a session stays "active" (= the pivot
@@ -225,8 +228,8 @@ fn apply_two_finger_ruler_update(
 
     let angle_delta = rotate_gesture.angle_delta();
     let config_shared = canvas.engine_ref().engine_config().clone();
-    // Turning quickly is held at the common angles, turning slowly is not, so that the angles
-    // right next to them stay reachable.
+    // The common angles hold the ruler while it is turned to within a degree and a half of one, and
+    // draw it on gently from there.
     let new_angle = {
         let config = config_shared.read();
         let ruler = &config.pens_config.brush_config.ruler_config;
@@ -234,6 +237,20 @@ fn apply_two_finger_ruler_update(
             .turn
             .update(ruler, angle_delta - begin.last_gesture_angle)
     };
+    // What the gesture reported and what became of it, for every update: the only way to tell why
+    // the ruler is hard to place with two fingers is to look at what the fingers send.
+    let now = Instant::now();
+    debug!(
+        gesture_angle_deg = angle_delta.to_degrees(),
+        step_deg = (angle_delta - begin.last_gesture_angle).to_degrees(),
+        shown_angle_deg = new_angle.to_degrees(),
+        touch_points = zoom_gesture.sequences().len(),
+        centroid_x = cx,
+        centroid_y = cy,
+        since_last_ms = now.duration_since(begin.last_update).as_secs_f64() * 1000.0,
+        "ruler two-finger update"
+    );
+    begin.last_update = now;
     begin.last_gesture_angle = angle_delta;
     // The rotation applied to the anchor's offset-from-pivot uses the EFFECTIVE
     // angular change (after snap), not the raw gesture delta, so the anchor
@@ -977,6 +994,7 @@ mod imp {
                                     angle_begin,
                                     turn: RulerTurn::new(angle_begin),
                                     last_gesture_angle: 0.0,
+                                    last_update: Instant::now(),
                                 }));
                             }
                         }
