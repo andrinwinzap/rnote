@@ -157,6 +157,10 @@
       <default>true</default>
       <summary>Whether the drawing cursor is visible</summary>
     </key>
+    <key name="hide-pen-cursor" type="b">
+      <default>false</default>
+      <summary>Whether no cursor is shown while a pen hovers over or draws on the canvas</summary>
+    </key>
     <key name="drawing-cursor" type="s">
       <default>"cursor-dot-small"</default>
       <summary>The drawing cursor</summary>

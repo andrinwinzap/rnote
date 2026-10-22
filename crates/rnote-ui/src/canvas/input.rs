@@ -56,6 +56,7 @@ pub(crate) fn handle_pointer_controller_event(
             _ => return (glib::Propagation::Proceed, pen_state, stylus_active),
         }
     }
+    canvas.set_pen_in_use(stylus_active);
 
     let mut handle_pen_event = false;
     let mut propagation = glib::Propagation::Proceed;

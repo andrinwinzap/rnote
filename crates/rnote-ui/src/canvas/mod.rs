@@ -48,6 +48,7 @@ struct Connections {
     appwindow_unsaved_changes: Option<glib::SignalHandlerId>,
     appwindow_touch_drawing: Option<glib::Binding>,
     appwindow_show_drawing_cursor: Option<glib::Binding>,
+    appwindow_hide_pen_cursor: Option<glib::Binding>,
     appwindow_regular_cursor: Option<glib::Binding>,
     appwindow_drawing_cursor: Option<glib::Binding>,
     appwindow_drop_target: Option<glib::SignalHandlerId>,
@@ -75,6 +76,8 @@ mod imp {
         pub(crate) key_controller_im_context: IMMulticontext,
         pub(crate) drop_target: DropTarget,
         pub(crate) drawing_cursor_enabled: Cell<bool>,
+        /// Whether a pen is hovering over or drawing on the canvas.
+        pub(crate) pen_in_use: Cell<bool>,
 
         pub(crate) engine: RefCell<Engine>,
         pub(crate) engine_task_handler_handle: RefCell<Option<glib::JoinHandle<()>>>,
@@ -90,6 +93,7 @@ mod imp {
         pub(crate) empty: Cell<bool>,
         pub(crate) touch_drawing: Cell<bool>,
         pub(crate) show_drawing_cursor: Cell<bool>,
+        pub(crate) hide_pen_cursor: Cell<bool>,
 
         pub(crate) last_export_dir: RefCell<Option<gio::File>>,
     }
@@ -171,6 +175,7 @@ mod imp {
                 key_controller_im_context,
                 drop_target,
                 drawing_cursor_enabled: Cell::new(false),
+                pen_in_use: Cell::new(false),
 
                 engine: RefCell::new(engine),
                 engine_task_handler_handle: RefCell::new(None),
@@ -187,6 +192,7 @@ mod imp {
                 empty: Cell::new(true),
                 touch_drawing: Cell::new(false),
                 show_drawing_cursor: Cell::new(false),
+                hide_pen_cursor: Cell::new(false),
 
                 last_export_dir: RefCell::new(None),
             }
@@ -308,6 +314,9 @@ mod imp {
                     glib::ParamSpecBoolean::builder("show-drawing-cursor")
                         .default_value(true)
                         .build(),
+                    glib::ParamSpecBoolean::builder("hide-pen-cursor")
+                        .default_value(false)
+                        .build(),
                     glib::ParamSpecString::builder("regular-cursor")
                         .default_value(Some("cursor-dot-medium"))
                         .build(),
@@ -336,6 +345,7 @@ mod imp {
                 "vscroll-policy" => self.vscroll_policy.get().to_value(),
                 "touch-drawing" => self.touch_drawing.get().to_value(),
                 "show-drawing-cursor" => self.show_drawing_cursor.get().to_value(),
+                "hide-pen-cursor" => self.hide_pen_cursor.get().to_value(),
                 "regular-cursor" => self.regular_cursor_icon_name.borrow().to_value(),
                 "drawing-cursor" => self.drawing_cursor_icon_name.borrow().to_value(),
                 _ => unimplemented!(),
@@ -394,16 +404,13 @@ mod imp {
                     let show_drawing_cursor: bool =
                         value.get().expect("The value needs to be of type `bool`");
                     self.show_drawing_cursor.replace(show_drawing_cursor);
-
-                    if self.drawing_cursor_enabled.get() {
-                        if show_drawing_cursor {
-                            obj.set_cursor(Some(&*self.drawing_cursor.borrow()));
-                        } else {
-                            obj.set_cursor(Some(&*self.invisible_cursor.borrow()));
-                        }
-                    } else {
-                        obj.set_cursor(Some(&*self.regular_cursor.borrow()));
-                    }
+                    obj.update_cursor();
+                }
+                "hide-pen-cursor" => {
+                    let hide_pen_cursor: bool =
+                        value.get().expect("The value needs to be of type `bool`");
+                    self.hide_pen_cursor.replace(hide_pen_cursor);
+                    obj.update_cursor();
                 }
                 "regular-cursor" => {
                     let icon_name = value.get().unwrap();
@@ -425,7 +432,7 @@ mod imp {
 
                     self.regular_cursor.replace(cursor);
 
-                    obj.set_cursor(Some(&*self.regular_cursor.borrow()));
+                    obj.update_cursor();
                 }
                 "drawing-cursor" => {
                     let icon_name = value.get().unwrap();
@@ -1004,15 +1011,33 @@ impl RnCanvas {
             return;
         };
         self.imp().drawing_cursor_enabled.set(drawing_cursor);
+        self.update_cursor();
+    }
 
-        if drawing_cursor {
-            if self.imp().show_drawing_cursor.get() {
-                self.set_cursor(Some(&*self.imp().drawing_cursor.borrow()));
+    /// Sets whether a pen is hovering over or drawing on the canvas, which hides the cursor when
+    /// the cursor is hidden for the pen.
+    pub(crate) fn set_pen_in_use(&self, pen_in_use: bool) {
+        if pen_in_use == self.imp().pen_in_use.get() {
+            return;
+        }
+        self.imp().pen_in_use.set(pen_in_use);
+        self.update_cursor();
+    }
+
+    /// Shows the cursor that fits what is on the canvas: none for a pen when the cursor is hidden
+    /// for it, the drawing cursor while drawing, the regular cursor otherwise.
+    fn update_cursor(&self) {
+        let imp = self.imp();
+        if imp.hide_pen_cursor.get() && imp.pen_in_use.get() {
+            self.set_cursor(Some(&*imp.invisible_cursor.borrow()));
+        } else if imp.drawing_cursor_enabled.get() {
+            if imp.show_drawing_cursor.get() {
+                self.set_cursor(Some(&*imp.drawing_cursor.borrow()));
             } else {
-                self.set_cursor(Some(&*self.imp().invisible_cursor.borrow()));
+                self.set_cursor(Some(&*imp.invisible_cursor.borrow()));
             }
         } else {
-            self.set_cursor(Some(&*self.imp().regular_cursor.borrow()));
+            self.set_cursor(Some(&*imp.regular_cursor.borrow()));
         }
     }
 
@@ -1368,6 +1393,15 @@ impl RnCanvas {
             .sync_create()
             .build();
 
+        // bind hide-pen-cursor
+        let appwindow_hide_pen_cursor = appwindow
+            .sidebar()
+            .settings_panel()
+            .general_hide_pen_cursor_row()
+            .bind_property("active", self, "hide-pen-cursor")
+            .sync_create()
+            .build();
+
         // Drop Target
         let appwindow_drop_target = self.imp().drop_target.connect_drop(clone!(
             #[weak(rename_to=canvas)]
@@ -1483,6 +1517,12 @@ impl RnCanvas {
             old.unbind();
         }
         if let Some(old) = connections
+            .appwindow_hide_pen_cursor
+            .replace(appwindow_hide_pen_cursor)
+        {
+            old.unbind();
+        }
+        if let Some(old) = connections
             .appwindow_regular_cursor
             .replace(appwindow_regular_cursor)
         {
@@ -1536,6 +1576,9 @@ impl RnCanvas {
             old.unbind();
         }
         if let Some(old) = connections.appwindow_show_drawing_cursor.take() {
+            old.unbind();
+        }
+        if let Some(old) = connections.appwindow_hide_pen_cursor.take() {
             old.unbind();
         }
         if let Some(old) = connections.appwindow_regular_cursor.take() {

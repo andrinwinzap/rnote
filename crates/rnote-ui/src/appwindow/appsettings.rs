@@ -135,6 +135,19 @@ impl RnAppWindow {
             .get_no_changes()
             .build();
 
+        // hide pen cursor
+        app_settings
+            .bind(
+                "hide-pen-cursor",
+                &self
+                    .sidebar()
+                    .settings_panel()
+                    .general_hide_pen_cursor_row(),
+                "active",
+            )
+            .get_no_changes()
+            .build();
+
         // lock pen tool
         app_settings
             .bind("lock-pen", self, "lock-pen")

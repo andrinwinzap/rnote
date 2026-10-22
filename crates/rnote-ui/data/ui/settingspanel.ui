@@ -105,6 +105,13 @@ gets disabled.</property>
                       </object>
                     </child>
                     <child>
+                      <object class="AdwSwitchRow" id="general_hide_pen_cursor_row">
+                        <property name="title" translatable="yes">Hide Cursor for the Pen</property>
+                        <property name="subtitle" translatable="yes">Show no cursor while a pen hovers over or draws on the canvas. The mouse and touchpad keep theirs</property>
+                        <property name="active">false</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="AdwActionRow" id="general_drawing_cursor_picker_row">
                         <property name="title" translatable="yes">Drawing Cursor</property>
                         <property name="subtitle" translatable="yes">Set the drawing cursor</property>
