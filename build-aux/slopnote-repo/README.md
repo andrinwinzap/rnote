@@ -8,7 +8,7 @@ The pipeline is `.github/workflows/slopnote_publish.yml`.
 Once it has run, the app is installed with:
 
 ```sh
-flatpak remote-add --if-not-exists slopnote https://<your domain>/slopnote.flatpakrepo
+flatpak remote-add --if-not-exists slopnote https://slopnote.andrinwinzap.ch/slopnote.flatpakrepo
 flatpak install slopnote ch.andrinwinzap.Slopnote
 ```
 
@@ -98,13 +98,18 @@ not ordinary is `disable_symlinks off`, without which nginx refuses to follow th
 publish swaps over.
 
 On a VM of its own, with nothing already terminating TLS, the shortest way is nginx serving the
-domain directly and certbot keeping the certificate:
+domain directly and certbot keeping the certificate. `nginx-vm.conf` in this directory is
+`nginx.conf` set up for that, listening on port 80 for `slopnote.andrinwinzap.ch`:
 
 ```sh
-certbot --nginx -d flatpak.example.org
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo cp nginx-vm.conf /etc/nginx/conf.d/slopnote.conf
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d slopnote.andrinwinzap.ch
 ```
 
-Change `listen 8081` to `listen 80` first, and let certbot add the TLS server block. If the image
+Certbot adds the TLS server block and the redirect, and renews the certificate on a timer. If the image
 is Oracle Linux or another distribution with SELinux enforcing, nginx is not allowed to read
 `/srv` until it is labelled for it:
 
@@ -120,7 +125,7 @@ If nginx runs in docker behind traefik, the labels are:
 ```yaml
 labels:
     - traefik.enable=true
-    - traefik.http.routers.slopnote.rule=Host(`flatpak.example.org`)
+    - traefik.http.routers.slopnote.rule=Host(`slopnote.andrinwinzap.ch`)
     - traefik.http.routers.slopnote.entrypoints=websecure
     - traefik.http.routers.slopnote.tls.certresolver=letsencrypt
     - traefik.http.services.slopnote.loadbalancer.server.port=8081
@@ -132,7 +137,7 @@ If nginx runs on the host, the same thing as a file for traefik's file provider:
 http:
     routers:
         slopnote:
-            rule: "Host(`flatpak.example.org`)"
+            rule: "Host(`slopnote.andrinwinzap.ch`)"
             entryPoints: [websecure]
             service: slopnote
             tls:
@@ -163,7 +168,7 @@ Variables:
 
 | Name | What goes in it |
 | --- | --- |
-| `SLOPNOTE_REPO_URL` | `https://flatpak.example.org`, with no trailing slash |
+| `SLOPNOTE_REPO_URL` | `https://slopnote.andrinwinzap.ch`, with no trailing slash |
 
 The host, user and path are secrets rather than variables only because they say where the server is
 and nothing is gained by printing them in a public log.
