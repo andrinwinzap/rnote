@@ -11,7 +11,7 @@ use p2d::math::Vector2;
 use rnote_compose::penevent::ShortcutKey;
 use rnote_engine::Camera;
 use rnote_engine::ext::GraphenePointExt;
-use rnote_engine::pens::pensconfig::rulerconfig::RulerTurn;
+use rnote_engine::pens::pensconfig::rulerconfig::{RulerTurn, touch_midpoint};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -35,6 +35,27 @@ struct RulerDragBegin {
     last_gesture_angle: f64,
     /// When the ruler was last updated, for logging how often the gesture reports.
     last_update: Instant,
+    /// Where the midpoint of the fingers was at the last update, to log it jumping.
+    last_centroid: Vector2,
+}
+
+/// The midpoint of the fingers on a gesture, at the precision of the touch points.
+///
+/// `Gesture::bounding_box_center` would do, but it goes through an integer rectangle: see
+/// [`touch_midpoint`].
+fn touch_midpoint_of(gesture: &GestureZoom) -> Option<Vector2> {
+    let points = gesture
+        .sequences()
+        .iter()
+        .filter_map(|sequence| gesture.point(Some(sequence)))
+        .map(|(x, y)| Vector2::new(x, y))
+        .collect::<Vec<Vector2>>();
+
+    touch_midpoint(points).or_else(|| {
+        gesture
+            .bounding_box_center()
+            .map(|(x, y)| Vector2::new(x, y))
+    })
 }
 
 /// How long after the last scroll event a session stays "active" (= the pivot
@@ -220,12 +241,14 @@ fn apply_two_finger_ruler_update(
     let zoom_gesture = &canvaswrapper.imp().canvas_zoom_gesture;
     let rotate_gesture = &canvaswrapper.imp().canvas_rotate_gesture;
 
-    let Some((cx, cy)) = zoom_gesture.bounding_box_center() else {
+    let Some(centroid_now) = touch_midpoint_of(zoom_gesture) else {
         return;
     };
-    let centroid_now = Vector2::new(cx, cy);
+    let now = Instant::now();
     let translation = centroid_now - begin.centroid_begin;
 
+    // The rotation is as the gesture reports it: it does not flicker, and anything done to it would
+    // put the ruler behind the fingers.
     let angle_delta = rotate_gesture.angle_delta();
     let config_shared = canvas.engine_ref().engine_config().clone();
     // The common angles hold the ruler while it is turned to within a degree and a half of one, and
@@ -239,17 +262,27 @@ fn apply_two_finger_ruler_update(
     };
     // What the gesture reported and what became of it, for every update: the only way to tell why
     // the ruler is hard to place with two fingers is to look at what the fingers send.
-    let now = Instant::now();
     debug!(
         gesture_angle_deg = angle_delta.to_degrees(),
-        step_deg = (angle_delta - begin.last_gesture_angle).to_degrees(),
         shown_angle_deg = new_angle.to_degrees(),
         touch_points = zoom_gesture.sequences().len(),
-        centroid_x = cx,
-        centroid_y = cy,
+        centroid = format!("{:.2},{:.2}", centroid_now.x, centroid_now.y),
         since_last_ms = now.duration_since(begin.last_update).as_secs_f64() * 1000.0,
         "ruler two-finger update"
     );
+    // A midpoint that jumps by a good deal in one report is not the fingers moving: it is worth
+    // seeing what the touchscreen was reporting when it did.
+    let jump = (centroid_now - begin.last_centroid).length();
+    if jump > 8.0 {
+        debug!(
+            jump,
+            touch_points = zoom_gesture.sequences().len(),
+            from = format!("{:.2},{:.2}", begin.last_centroid.x, begin.last_centroid.y),
+            to = format!("{:.2},{:.2}", centroid_now.x, centroid_now.y),
+            "ruler midpoint jumped"
+        );
+    }
+    begin.last_centroid = centroid_now;
     begin.last_update = now;
     begin.last_gesture_angle = angle_delta;
     // The rotation applied to the anchor's offset-from-pivot uses the EFFECTIVE
@@ -938,6 +971,8 @@ mod imp {
                             .map(|d| d.source() == gdk::InputSource::Touchscreen)
                             .unwrap_or(false);
                         if from_touchscreen && let Some(bbcenter) = bbcenter {
+                            // The ruler follows the exact midpoint, so that is what it starts from.
+                            let bbcenter = touch_midpoint_of(gesture).unwrap_or(bbcenter);
                             let projected_opt = {
                                 let config = canvas.engine_ref().engine_config().clone();
                                 let config = config.read();
@@ -995,6 +1030,7 @@ mod imp {
                                     turn: RulerTurn::new(angle_begin),
                                     last_gesture_angle: 0.0,
                                     last_update: Instant::now(),
+                                    last_centroid: bbcenter,
                                 }));
                             }
                         }

@@ -81,6 +81,25 @@ impl RulerTurn {
     }
 }
 
+/// The midpoint of the bounding box of the given touch points, at the precision they have.
+///
+/// This is what the two-finger gesture follows. It cannot be had from the gesture itself: GTK works
+/// it out through an integer rectangle, so the midpoint of two fingers moves in whole pixels and
+/// flickers by one whenever a finger sits near the edge between two of them, which moved the whole
+/// ruler in small jumps while it was turned. The points themselves are exact, and following their
+/// midpoint is as smooth as following one finger.
+///
+/// `None` when there are no points.
+pub fn touch_midpoint(points: impl IntoIterator<Item = Vector2>) -> Option<Vector2> {
+    let mut points = points.into_iter();
+    let first = points.next()?;
+    let (min, max) = points.fold((first, first), |(min, max), point| {
+        (min.min(point), max.max(point))
+    });
+
+    Some((min + max) * 0.5)
+}
+
 /// Configuration and runtime state for the on-canvas ruler.
 ///
 /// The ruler is a translucent straight-edge spanning the viewport. Position is
@@ -524,6 +543,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_midpoint_of_two_fingers_keeps_the_precision_of_the_points() {
+        let midpoint = touch_midpoint([Vector2::new(619.25, 462.5), Vector2::new(700.75, 500.0)]);
+
+        // Not a whole number of pixels, which is what going through an integer rectangle gave.
+        assert_eq!(midpoint, Some(Vector2::new(660.0, 481.25)));
+    }
+
+    #[test]
+    fn the_midpoint_moves_smoothly_while_a_finger_does() {
+        // One finger moving a tenth of a pixel at a time moves the midpoint by half of that, with no
+        // steps and no flicker.
+        let mut last: Option<f64> = None;
+        for i in 0..20 {
+            let moved = i as f64 * 0.1;
+            let midpoint = touch_midpoint([
+                Vector2::new(600.0 + moved, 460.0),
+                Vector2::new(700.0, 500.0),
+            ])
+            .unwrap();
+            if let Some(last) = last {
+                let step = midpoint.x - last;
+                assert!((step - 0.05).abs() < 1e-9, "stepped by {step}");
+            }
+            last = Some(midpoint.x);
+        }
+    }
+
+    #[test]
+    fn no_fingers_have_no_midpoint() {
+        assert_eq!(touch_midpoint([]), None);
+    }
+
+    #[test]
+    fn one_finger_is_its_own_midpoint() {
+        assert_eq!(
+            touch_midpoint([Vector2::new(12.5, 40.25)]),
+            Some(Vector2::new(12.5, 40.25))
+        );
     }
 
     #[test]
