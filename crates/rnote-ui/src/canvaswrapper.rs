@@ -15,7 +15,7 @@ use rnote_engine::pens::pensconfig::rulerconfig::{RulerTurn, touch_midpoint};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// State recorded at the start of a two-finger ruler gesture. The rotation
 /// pivot (projected centroid) is fixed for the duration of the gesture; the
@@ -262,12 +262,24 @@ fn apply_two_finger_ruler_update(
     };
     // What the gesture reported and what became of it, for every update: the only way to tell why
     // the ruler is hard to place with two fingers is to look at what the fingers send.
-    debug!(
+    let since_last_ms = now.duration_since(begin.last_update).as_secs_f64() * 1000.0;
+    // A pause in the middle of a turn is what a ruler that sticks looks like from here: what the
+    // fingers did before and after it is what says whether they moved while nothing was reported.
+    if since_last_ms > 120.0 {
+        debug!(
+            since_last_ms,
+            step_deg = (angle_delta - begin.last_gesture_angle).to_degrees(),
+            jump = (centroid_now - begin.last_centroid).length(),
+            touch_points = zoom_gesture.sequences().len(),
+            "ruler two-finger update after a pause"
+        );
+    }
+    trace!(
         gesture_angle_deg = angle_delta.to_degrees(),
         shown_angle_deg = new_angle.to_degrees(),
         touch_points = zoom_gesture.sequences().len(),
         centroid = format!("{:.2},{:.2}", centroid_now.x, centroid_now.y),
-        since_last_ms = now.duration_since(begin.last_update).as_secs_f64() * 1000.0,
+        since_last_ms,
         "ruler two-finger update"
     );
     // A midpoint that jumps by a good deal in one report is not the fingers moving: it is worth
@@ -942,6 +954,10 @@ mod imp {
                     obj,
                     move |gesture, _| {
                         gesture.set_state(EventSequenceState::Claimed);
+                        debug!(
+                            touch_points = gesture.sequences().len(),
+                            "two-finger gesture began"
+                        );
 
                         // workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/187
                         canvaswrapper.imp().workaround_disable_kinetic_scrolling();
@@ -1113,7 +1129,12 @@ mod imp {
                     ruler_drag,
                     #[weak(rename_to=canvaswrapper)]
                     obj,
-                    move |_gesture, _event_sequence| {
+                    move |gesture, _event_sequence| {
+                        debug!(
+                            on_the_ruler = ruler_drag.get().is_some(),
+                            touch_points = gesture.sequences().len(),
+                            "two-finger gesture ended"
+                        );
                         // workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/187
                         canvaswrapper.imp().workaround_restore_kinetic_scrolling();
                         ruler_drag.set(None);
@@ -1134,6 +1155,11 @@ mod imp {
                     #[weak(rename_to=canvaswrapper)]
                     obj,
                     move |gesture, _event_sequence| {
+                        debug!(
+                            on_the_ruler = ruler_drag.get().is_some(),
+                            touch_points = gesture.sequences().len(),
+                            "two-finger gesture cancelled"
+                        );
                         gesture.set_state(EventSequenceState::Denied);
 
                         // workaround for https://gitlab.gnome.org/GNOME/gtk/-/issues/187
@@ -1330,6 +1356,7 @@ mod imp {
                         #[weak(rename_to=canvaswrapper)]
                         obj,
                         move |_gesture, _, _| {
+                            debug!("two-finger long press");
                             let (_, widget_flags) = canvaswrapper
                                 .canvas()
                                 .engine_mut()
