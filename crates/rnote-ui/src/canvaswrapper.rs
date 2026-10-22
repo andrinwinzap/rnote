@@ -32,10 +32,6 @@ struct RulerDragBegin {
     turn: RulerTurn,
     /// The line from one finger to the other at the last update, to get at the turn since it.
     last_fingers: Option<Vector2>,
-    /// When the ruler was last updated, for logging how often the gesture reports.
-    last_update: Instant,
-    /// Where the midpoint of the fingers was at the last update, to log it jumping.
-    last_centroid: Vector2,
 }
 
 /// Where the fingers on a gesture are, at the precision the touchscreen reports them.
@@ -48,10 +44,6 @@ fn touch_points_of(gesture: &GestureZoom) -> Vec<Vector2> {
         .collect()
 }
 
-/// The midpoint of the fingers on a gesture, at the precision of the touch points.
-///
-/// `Gesture::bounding_box_center` would do, but it goes through an integer rectangle: see
-/// [`touch_midpoint`].
 /// The line from one finger to the other, when there are two.
 fn finger_line(points: &[Vector2]) -> Option<Vector2> {
     match points {
@@ -60,6 +52,10 @@ fn finger_line(points: &[Vector2]) -> Option<Vector2> {
     }
 }
 
+/// The midpoint of the fingers on a gesture, at the precision of the touch points.
+///
+/// `Gesture::bounding_box_center` would do, but it goes through an integer rectangle: see
+/// [`touch_midpoint`].
 fn touch_midpoint_of(gesture: &GestureZoom) -> Option<Vector2> {
     touch_midpoint(touch_points_of(gesture)).or_else(|| {
         gesture
@@ -260,7 +256,6 @@ fn apply_two_finger_ruler_update(
     }) else {
         return;
     };
-    let now = Instant::now();
     let translation = centroid_now - begin.centroid_begin;
 
     let fingers_now = finger_line(&points);
@@ -276,47 +271,12 @@ fn apply_two_finger_ruler_update(
         let ruler = &config.pens_config.brush_config.ruler_config;
         begin.turn.update(ruler, step)
     };
-    // What the gesture reported and what became of it, for every update: the only way to tell why
-    // the ruler is hard to place with two fingers is to look at what the fingers send.
-    let since_last_ms = now.duration_since(begin.last_update).as_secs_f64() * 1000.0;
-    // A pause in the middle of a turn is what a ruler that sticks looks like from here: what the
-    // fingers did before and after it is what says whether they moved while nothing was reported.
-    if since_last_ms > 120.0 {
-        // How far apart the fingers are says how finely their rotation can be told: the angle
-        // between two points changes by about a pixel over their distance for each pixel one moves.
-        let separation = fingers_now.map(|line| line.length()).unwrap_or(0.0);
-        debug!(
-            since_last_ms,
-            step_deg = step.to_degrees(),
-            jump = (centroid_now - begin.last_centroid).length(),
-            touch_points = points.len(),
-            finger_separation_px = separation,
-            one_pixel_is_deg = (1.0 / separation.max(1.0)).atan().to_degrees(),
-            "ruler two-finger update after a pause"
-        );
-    }
     trace!(
         step_deg = step.to_degrees(),
         shown_angle_deg = new_angle.to_degrees(),
-        touch_points = zoom_gesture.sequences().len(),
-        centroid = format!("{:.2},{:.2}", centroid_now.x, centroid_now.y),
-        since_last_ms,
+        touch_points = points.len(),
         "ruler two-finger update"
     );
-    // A midpoint that jumps by a good deal in one report is not the fingers moving: it is worth
-    // seeing what the touchscreen was reporting when it did.
-    let jump = (centroid_now - begin.last_centroid).length();
-    if jump > 8.0 {
-        debug!(
-            jump,
-            touch_points = zoom_gesture.sequences().len(),
-            from = format!("{:.2},{:.2}", begin.last_centroid.x, begin.last_centroid.y),
-            to = format!("{:.2},{:.2}", centroid_now.x, centroid_now.y),
-            "ruler midpoint jumped"
-        );
-    }
-    begin.last_centroid = centroid_now;
-    begin.last_update = now;
     // Kept when a finger is not reported for a moment, so the turn picks up from where it was.
     begin.last_fingers = fingers_now.or(begin.last_fingers);
     // The rotation applied to the anchor's offset-from-pivot uses the EFFECTIVE
@@ -1067,8 +1027,6 @@ mod imp {
                                     angle_begin,
                                     turn: RulerTurn::new(angle_begin),
                                     last_fingers: finger_line(&touch_points_of(gesture)),
-                                    last_update: Instant::now(),
-                                    last_centroid: bbcenter,
                                 }));
                             }
                         }
