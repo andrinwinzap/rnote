@@ -708,11 +708,24 @@ impl Brush {
         let recognized_shape = if let Some(Stroke::BrushStroke(brushstroke)) =
             engine_view.store.get_stroke_ref(current_stroke_key)
         {
-            shaperecognition::recognize_shape(&brushstroke.path, engine_view.camera.total_zoom())
+            let zoom = engine_view.camera.total_zoom();
+            let brush_config = &engine_view.config.pens_config.brush_config;
+            shaperecognition::recognize_shape(&brushstroke.path, zoom).map(|shape| {
+                // The shape is as wide as the stroke it replaces was on average, which is what sets
+                // how it looks: a firm press is a thick line, a light one a thin line.
+                let width = shaperecognition::mean_width(&brushstroke.path, zoom, |pressure| {
+                    brush_config.stroke_width_for_pressure(pressure)
+                })
+                .unwrap_or_else(|| {
+                    brush_config.stroke_width_for_pressure(Element::PRESSURE_DEFAULT)
+                });
+
+                (shape, width)
+            })
         } else {
             None
         };
-        let Some(shape) = recognized_shape else {
+        let Some((shape, stroke_width)) = recognized_shape else {
             return widget_flags;
         };
 
@@ -725,7 +738,7 @@ impl Brush {
                     .config
                     .pens_config
                     .brush_config
-                    .style_for_recognized_shape(),
+                    .style_for_recognized_shape(stroke_width),
             )),
             Some(
                 engine_view

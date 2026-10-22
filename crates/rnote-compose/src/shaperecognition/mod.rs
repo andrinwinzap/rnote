@@ -96,6 +96,61 @@ pub fn recognize_shape(path: &PenPath, zoom: f64) -> Option<Shape> {
     }
 }
 
+/// The mean width of the stroke as it was drawn, for the width of the shape that replaces it.
+///
+/// `width_for_pressure` is the width a stroke has at a given pen pressure, as its style draws it.
+/// The width is averaged, and not the pressure, since the two only agree for a curve that is a
+/// straight line: for any other, a stroke drawn with the mean pressure is not as wide as the
+/// stroke was on average.
+///
+/// Weighted by length, so that what counts is how wide the stroke was along the way and not how
+/// slowly it moved: a slow stretch reports many more events than a quick one covering the same
+/// distance. The resting tail at the end of the stroke, where the pen is held still to trigger the
+/// recognition, is left out for the same reason - it reports for as long as the hold lasts.
+///
+/// `None` for a path without elements.
+pub fn mean_width(
+    path: &PenPath,
+    zoom: f64,
+    width_for_pressure: impl Fn(f64) -> f64,
+) -> Option<f64> {
+    let mut elements = vec![path.start];
+    elements.extend(path.segments.iter().map(|segment| segment.end()));
+    let last_pos = elements.last()?.pos;
+    let radius = HOLD_RADIUS_SURFACE / zoom;
+
+    // Keep the element that moves into the hold, and nothing that came to rest after it. A stroke
+    // that never leaves the hold radius has no tail to speak of, so all of it is used.
+    let kept = elements
+        .iter()
+        .rposition(|element| (element.pos - last_pos).length() > radius)
+        .map_or(elements.len(), |i| (i + 2).min(elements.len()));
+    let elements = &elements[..kept];
+
+    // A stroke is drawn with the width changing steadily between two elements, so the mean along
+    // it is that of the widths at both ends.
+    let (mut weighted, mut length) = (0.0, 0.0);
+    for pair in elements.windows(2) {
+        let segment = (pair[1].pos - pair[0].pos).length();
+        let width =
+            (width_for_pressure(pair[0].pressure) + width_for_pressure(pair[1].pressure)) * 0.5;
+        weighted += segment * width;
+        length += segment;
+    }
+    if length > f64::EPSILON {
+        return Some(weighted / length);
+    }
+
+    // Nothing moved, so there is nothing to weigh by.
+    Some(
+        elements
+            .iter()
+            .map(|element| width_for_pressure(element.pressure))
+            .sum::<f64>()
+            / elements.len() as f64,
+    )
+}
+
 /// Extract the flattened points of the pen path.
 fn flattened_points(path: &PenPath) -> Vec<Vector2> {
     let mut points = Vec::new();
@@ -529,6 +584,82 @@ mod tests {
         let a = ((i as f64) * 12.9898).sin() * 43758.5453;
         let b = ((i as f64) * 78.233).sin() * 24634.6345;
         Vector2::new(a.fract(), b.fract()) * magnitude
+    }
+
+    /// A path through the given positions, each with its own pressure.
+    fn pressured_path(points: impl IntoIterator<Item = (Vector2, f64)>) -> PenPath {
+        PenPath::try_from_elements(
+            points
+                .into_iter()
+                .map(|(p, pressure)| Element::new(p, pressure)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn mean_width_of_a_steady_stroke_is_its_width() {
+        let path =
+            pressured_path((0..=20).map(|i| (Vector2::new(100.0 + 5.0 * i as f64, 100.0), 0.8)));
+
+        let pressure = mean_width(&path, 1.0, |pressure| pressure).unwrap();
+
+        assert!((pressure - 0.8).abs() < 1e-9, "{pressure}");
+    }
+
+    #[test]
+    fn mean_width_is_weighted_by_length_and_not_by_event_count() {
+        // A long quick stretch at 0.8, then a short slow stretch at 0.2 that reports ten times as
+        // often. Counting events would call this stroke light, but nearly all of the ink is heavy.
+        let quick = (0..=4).map(|i| (Vector2::new(100.0 + 50.0 * i as f64, 100.0), 0.8));
+        let slow = (1..=40).map(|i| (Vector2::new(300.0 + 0.25 * i as f64, 100.0), 0.2));
+        let path = pressured_path(quick.chain(slow));
+
+        let pressure = mean_width(&path, 1.0, |pressure| pressure).unwrap();
+
+        assert!(
+            pressure > 0.7,
+            "expected the long heavy stretch to win, got {pressure}"
+        );
+    }
+
+    #[test]
+    fn mean_width_is_the_mean_of_the_widths_and_not_the_width_of_the_mean_pressure() {
+        // Half of the stroke at the lightest pressure and half at the hardest, with a width that
+        // goes with the square of the pressure. Its mean pressure is 0.5, which would be a width
+        // of 0.25, but the stroke was on average a good deal wider than that.
+        let light = (0..=10).map(|i| (Vector2::new(100.0 + 5.0 * i as f64, 100.0), 0.0));
+        let hard = (1..=10).map(|i| (Vector2::new(150.0 + 5.0 * i as f64, 100.0), 1.0));
+        let path = pressured_path(light.chain(hard));
+
+        let width = mean_width(&path, 1.0, |pressure| pressure * pressure).unwrap();
+
+        assert!(width > 0.4, "expected about half, got {width}");
+    }
+
+    #[test]
+    fn mean_width_leaves_out_the_resting_tail() {
+        // Drawn at 0.8, then held still for the recognition: a hundred events at 0.1, all within
+        // a pixel of where the stroke ended. They say nothing about how hard it was drawn.
+        let drawn = (0..=20).map(|i| (Vector2::new(100.0 + 5.0 * i as f64, 100.0), 0.8));
+        let rest = (0..100).map(|i| (Vector2::new(200.0, 100.0) + jitter(i, 0.5), 0.1));
+        let path = pressured_path(drawn.chain(rest));
+
+        let pressure = mean_width(&path, 1.0, |pressure| pressure).unwrap();
+
+        assert!(
+            pressure > 0.75,
+            "the hold dragged the pressure to {pressure}"
+        );
+    }
+
+    #[test]
+    fn mean_width_of_a_stroke_that_never_moved_is_still_something() {
+        let path =
+            pressured_path((0..10).map(|i| (Vector2::new(100.0, 100.0) + jitter(i, 0.2), 0.6)));
+
+        let pressure = mean_width(&path, 1.0, |pressure| pressure).unwrap();
+
+        assert!((pressure - 0.6).abs() < 1e-9, "{pressure}");
     }
 
     #[test]

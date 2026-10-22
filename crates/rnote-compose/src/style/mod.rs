@@ -357,6 +357,20 @@ impl PressureCurve {
             Self::Pow3 => width * pressure.powi(3),
         }
     }
+
+    /// The factor a width is scaled with for the given pressure, relative to the pressure of input
+    /// that has none (mouse, touch), which leaves the width as it is.
+    ///
+    /// Limited, so that neither a very light nor a very hard press makes a stroke vanish or take
+    /// over the page. A curve that ignores the pressure never changes the width.
+    pub fn relative_width_factor(&self, pressure: f64) -> f64 {
+        let reference = self.apply(1.0, crate::penpath::Element::PRESSURE_DEFAULT);
+        if reference <= f64::EPSILON {
+            return 1.0;
+        }
+
+        (self.apply(1.0, pressure.clamp(0.0, 1.0)) / reference).clamp(0.1, 4.0)
+    }
 }
 
 impl TryFrom<u32> for PressureCurve {
@@ -365,5 +379,51 @@ impl TryFrom<u32> for PressureCurve {
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         num_traits::FromPrimitive::from_u32(value)
             .with_context(|| format!("PressureCurve try_from::<u32>() for value {value} failed"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::penpath::Element;
+
+    #[test]
+    fn input_without_pressure_leaves_the_width_alone() {
+        // Mouse and touch report the default pressure, whatever the curve.
+        for curve in [
+            PressureCurve::Const,
+            PressureCurve::Linear,
+            PressureCurve::Sqrt,
+            PressureCurve::Cbrt,
+            PressureCurve::Pow2,
+            PressureCurve::Pow3,
+        ] {
+            let factor = curve.relative_width_factor(Element::PRESSURE_DEFAULT);
+            assert!((factor - 1.0).abs() < 1e-9, "{curve:?} gave {factor}");
+        }
+    }
+
+    #[test]
+    fn a_curve_that_ignores_pressure_never_changes_the_width() {
+        for pressure in [0.0, 0.2, 0.9, 1.0] {
+            assert_eq!(PressureCurve::Const.relative_width_factor(pressure), 1.0);
+        }
+    }
+
+    #[test]
+    fn pressing_harder_is_wider_and_softer_is_thinner() {
+        let curve = PressureCurve::Linear;
+
+        assert!(curve.relative_width_factor(0.9) > 1.0);
+        assert!(curve.relative_width_factor(0.2) < 1.0);
+        // Linear, so twice the default pressure is twice the width.
+        assert!((curve.relative_width_factor(1.0) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_factor_is_limited() {
+        // A cubic curve at full pressure would be eight times as wide, and at none it would vanish.
+        assert_eq!(PressureCurve::Pow3.relative_width_factor(1.0), 4.0);
+        assert_eq!(PressureCurve::Pow3.relative_width_factor(0.0), 0.1);
     }
 }

@@ -122,12 +122,9 @@ impl ShaperConfig {
         if !self.pen_pressure {
             return 1.0;
         }
-        let curve = self.smooth_options.pressure_curve;
-        let reference = curve.apply(1.0, rnote_compose::penpath::Element::PRESSURE_DEFAULT);
-        if reference <= f64::EPSILON {
-            return 1.0;
-        }
-        (curve.apply(1.0, pressure.clamp(0.0, 1.0)) / reference).clamp(0.1, 4.0)
+        self.smooth_options
+            .pressure_curve
+            .relative_width_factor(pressure)
     }
 
     /// The style for the current options with the width scaled by the pressure.
