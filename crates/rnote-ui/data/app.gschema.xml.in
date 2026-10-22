@@ -161,6 +161,10 @@
       <default>false</default>
       <summary>Whether no cursor is shown while a pen hovers over or draws on the canvas</summary>
     </key>
+    <key name="hide-eraser-square" type="b">
+      <default>false</default>
+      <summary>Whether the eraser's square is not shown when erasing with a pen</summary>
+    </key>
     <key name="drawing-cursor" type="s">
       <default>"cursor-dot-small"</default>
       <summary>The drawing cursor</summary>

@@ -49,6 +49,7 @@ struct Connections {
     appwindow_touch_drawing: Option<glib::Binding>,
     appwindow_show_drawing_cursor: Option<glib::Binding>,
     appwindow_hide_pen_cursor: Option<glib::Binding>,
+    appwindow_hide_eraser_square: Option<glib::Binding>,
     appwindow_regular_cursor: Option<glib::Binding>,
     appwindow_drawing_cursor: Option<glib::Binding>,
     appwindow_drop_target: Option<glib::SignalHandlerId>,
@@ -96,6 +97,7 @@ mod imp {
         pub(crate) touch_drawing: Cell<bool>,
         pub(crate) show_drawing_cursor: Cell<bool>,
         pub(crate) hide_pen_cursor: Cell<bool>,
+        pub(crate) hide_eraser_square: Cell<bool>,
 
         pub(crate) last_export_dir: RefCell<Option<gio::File>>,
     }
@@ -196,6 +198,7 @@ mod imp {
                 touch_drawing: Cell::new(false),
                 show_drawing_cursor: Cell::new(false),
                 hide_pen_cursor: Cell::new(false),
+                hide_eraser_square: Cell::new(false),
 
                 last_export_dir: RefCell::new(None),
             }
@@ -320,6 +323,9 @@ mod imp {
                     glib::ParamSpecBoolean::builder("hide-pen-cursor")
                         .default_value(false)
                         .build(),
+                    glib::ParamSpecBoolean::builder("hide-eraser-square")
+                        .default_value(false)
+                        .build(),
                     glib::ParamSpecString::builder("regular-cursor")
                         .default_value(Some("cursor-dot-medium"))
                         .build(),
@@ -349,6 +355,7 @@ mod imp {
                 "touch-drawing" => self.touch_drawing.get().to_value(),
                 "show-drawing-cursor" => self.show_drawing_cursor.get().to_value(),
                 "hide-pen-cursor" => self.hide_pen_cursor.get().to_value(),
+                "hide-eraser-square" => self.hide_eraser_square.get().to_value(),
                 "regular-cursor" => self.regular_cursor_icon_name.borrow().to_value(),
                 "drawing-cursor" => self.drawing_cursor_icon_name.borrow().to_value(),
                 _ => unimplemented!(),
@@ -413,11 +420,16 @@ mod imp {
                     let hide_pen_cursor: bool =
                         value.get().expect("The value needs to be of type `bool`");
                     self.hide_pen_cursor.replace(hide_pen_cursor);
+                    obj.update_cursor();
+                }
+                "hide-eraser-square" => {
+                    let hide_eraser_square: bool =
+                        value.get().expect("The value needs to be of type `bool`");
+                    self.hide_eraser_square.replace(hide_eraser_square);
                     self.engine
                         .borrow_mut()
                         .penholder
-                        .set_hide_pen_hover_marks(hide_pen_cursor);
-                    obj.update_cursor();
+                        .set_hide_eraser_square(hide_eraser_square);
                     obj.queue_draw();
                 }
                 "regular-cursor" => {
@@ -1410,6 +1422,15 @@ impl RnCanvas {
             .sync_create()
             .build();
 
+        // bind hide-eraser-square
+        let appwindow_hide_eraser_square = appwindow
+            .sidebar()
+            .settings_panel()
+            .general_hide_eraser_square_row()
+            .bind_property("active", self, "hide-eraser-square")
+            .sync_create()
+            .build();
+
         // Drop Target
         let appwindow_drop_target = self.imp().drop_target.connect_drop(clone!(
             #[weak(rename_to=canvas)]
@@ -1531,6 +1552,12 @@ impl RnCanvas {
             old.unbind();
         }
         if let Some(old) = connections
+            .appwindow_hide_eraser_square
+            .replace(appwindow_hide_eraser_square)
+        {
+            old.unbind();
+        }
+        if let Some(old) = connections
             .appwindow_regular_cursor
             .replace(appwindow_regular_cursor)
         {
@@ -1587,6 +1614,9 @@ impl RnCanvas {
             old.unbind();
         }
         if let Some(old) = connections.appwindow_hide_pen_cursor.take() {
+            old.unbind();
+        }
+        if let Some(old) = connections.appwindow_hide_eraser_square.take() {
             old.unbind();
         }
         if let Some(old) = connections.appwindow_regular_cursor.take() {

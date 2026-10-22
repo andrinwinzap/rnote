@@ -45,9 +45,9 @@ pub struct PenHolder {
     toggle_pen_style: Option<PenStyle>,
     #[serde(skip)]
     prev_shortcut_key: Option<ShortcutKey>,
-    /// Whether the marks a pen shows of where it is while it hovers are left out, as the cursor is.
+    /// Whether the eraser's square is left out when erasing with a pen.
     #[serde(skip)]
-    hide_pen_hover_marks: bool,
+    hide_eraser_square: bool,
     /// Whether the last pen event came from a pen, rather than a mouse or touch.
     #[serde(skip)]
     pen_input: bool,
@@ -63,7 +63,7 @@ impl Default for PenHolder {
             progress: PenProgress::Idle,
             toggle_pen_style: None,
             prev_shortcut_key: None,
-            hide_pen_hover_marks: false,
+            hide_eraser_square: false,
             pen_input: false,
         }
     }
@@ -226,10 +226,10 @@ impl PenHolder {
         (event_result.propagate, widget_flags)
     }
 
-    /// Sets whether the marks a pen shows of where it is while it hovers are left out, for when
-    /// the cursor is hidden for the pen. A mouse keeps them.
-    pub fn set_hide_pen_hover_marks(&mut self, hide: bool) {
-        self.hide_pen_hover_marks = hide;
+    /// Sets whether the eraser's square is left out, while it hovers and while it erases, when
+    /// erasing with a pen. A mouse keeps it, as it is all that shows where the eraser is.
+    pub fn set_hide_eraser_square(&mut self, hide: bool) {
+        self.hide_eraser_square = hide;
     }
 
     /// Handle a requested animation frame.
@@ -503,12 +503,7 @@ impl DrawableOnDoc for PenHolder {
         cx: &mut piet_cairo::CairoRenderContext,
         engine_view: &EngineView,
     ) -> anyhow::Result<()> {
-        // The eraser's square is where it is, as a cursor would be.
-        if self.hide_pen_hover_marks
-            && self.pen_input
-            && let Pen::Eraser(eraser) = &self.current_pen
-            && eraser.hovering()
-        {
+        if self.hide_eraser_square && self.pen_input && matches!(self.current_pen, Pen::Eraser(_)) {
             return Ok(());
         }
 

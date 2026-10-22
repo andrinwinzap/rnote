@@ -112,6 +112,13 @@ gets disabled.</property>
                       </object>
                     </child>
                     <child>
+                      <object class="AdwSwitchRow" id="general_hide_eraser_square_row">
+                        <property name="title" translatable="yes">Hide Eraser Square for the Pen</property>
+                        <property name="subtitle" translatable="yes">Show no square while a pen hovers or erases with the eraser. The mouse and touchpad keep it</property>
+                        <property name="active">false</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="AdwActionRow" id="general_drawing_cursor_picker_row">
                         <property name="title" translatable="yes">Drawing Cursor</property>
                         <property name="subtitle" translatable="yes">Set the drawing cursor</property>

@@ -148,6 +148,19 @@ impl RnAppWindow {
             .get_no_changes()
             .build();
 
+        // hide eraser square
+        app_settings
+            .bind(
+                "hide-eraser-square",
+                &self
+                    .sidebar()
+                    .settings_panel()
+                    .general_hide_eraser_square_row(),
+                "active",
+            )
+            .get_no_changes()
+            .build();
+
         // lock pen tool
         app_settings
             .bind("lock-pen", self, "lock-pen")
