@@ -413,7 +413,12 @@ mod imp {
                     let hide_pen_cursor: bool =
                         value.get().expect("The value needs to be of type `bool`");
                     self.hide_pen_cursor.replace(hide_pen_cursor);
+                    self.engine
+                        .borrow_mut()
+                        .penholder
+                        .set_hide_pen_hover_marks(hide_pen_cursor);
                     obj.update_cursor();
+                    obj.queue_draw();
                 }
                 "regular-cursor" => {
                     let icon_name = value.get().unwrap();

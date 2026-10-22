@@ -166,6 +166,13 @@ impl PenBehaviour for Eraser {
     }
 }
 
+impl Eraser {
+    /// Whether the eraser is over the canvas without touching it.
+    pub(crate) fn hovering(&self) -> bool {
+        matches!(self.state, EraserState::Proximity(_))
+    }
+}
+
 impl DrawableOnDoc for Eraser {
     fn bounds_on_doc(&self, engine_view: &EngineView) -> Option<Aabb> {
         match &self.state {

@@ -45,6 +45,12 @@ pub struct PenHolder {
     toggle_pen_style: Option<PenStyle>,
     #[serde(skip)]
     prev_shortcut_key: Option<ShortcutKey>,
+    /// Whether the marks a pen shows of where it is while it hovers are left out, as the cursor is.
+    #[serde(skip)]
+    hide_pen_hover_marks: bool,
+    /// Whether the last pen event came from a pen, rather than a mouse or touch.
+    #[serde(skip)]
+    pen_input: bool,
 }
 
 impl Default for PenHolder {
@@ -57,6 +63,8 @@ impl Default for PenHolder {
             progress: PenProgress::Idle,
             toggle_pen_style: None,
             prev_shortcut_key: None,
+            hide_pen_hover_marks: false,
+            pen_input: false,
         }
     }
 }
@@ -193,6 +201,7 @@ impl PenHolder {
     ) -> (EventPropagation, WidgetFlags) {
         let mut widget_flags = WidgetFlags::default();
 
+        self.pen_input = pen_mode.is_some();
         if let Some(pen_mode) = pen_mode {
             widget_flags |= self.change_pen_mode(pen_mode, engine_view);
         }
@@ -215,6 +224,12 @@ impl PenHolder {
         widget_flags.redraw = true;
 
         (event_result.propagate, widget_flags)
+    }
+
+    /// Sets whether the marks a pen shows of where it is while it hovers are left out, for when
+    /// the cursor is hidden for the pen. A mouse keeps them.
+    pub fn set_hide_pen_hover_marks(&mut self, hide: bool) {
+        self.hide_pen_hover_marks = hide;
     }
 
     /// Handle a requested animation frame.
@@ -488,6 +503,15 @@ impl DrawableOnDoc for PenHolder {
         cx: &mut piet_cairo::CairoRenderContext,
         engine_view: &EngineView,
     ) -> anyhow::Result<()> {
+        // The eraser's square is where it is, as a cursor would be.
+        if self.hide_pen_hover_marks
+            && self.pen_input
+            && let Pen::Eraser(eraser) = &self.current_pen
+            && eraser.hovering()
+        {
+            return Ok(());
+        }
+
         cx.save().map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
         self.current_pen.draw_on_doc(cx, engine_view)?;
