@@ -100,6 +100,28 @@ pub fn touch_midpoint(points: impl IntoIterator<Item = Vector2>) -> Option<Vecto
     Some((min + max) * 0.5)
 }
 
+/// How far the line between two fingers turned, from the vector between them before to the one
+/// after, in radians.
+///
+/// The ruler takes its rotation from this rather than from GTK's rotate gesture, so that its turn
+/// and its midpoint come from the same touch points. The two gestures each keep their own copy of
+/// the points and are updated one after the other, so taking the turn from one and the midpoint
+/// from the other let them disagree, and each only reported when its own value changed: the ruler
+/// held still while the fingers moved, then caught up all at once.
+///
+/// Which finger comes first is not something the gesture keeps to, and a line between two fingers
+/// is the same line either way round, so the turn is folded into a quarter turn either side.
+pub fn finger_turn(before: Vector2, after: Vector2) -> f64 {
+    let turn = before.perp_dot(after).atan2(before.dot(after));
+    if turn > std::f64::consts::FRAC_PI_2 {
+        turn - std::f64::consts::PI
+    } else if turn <= -std::f64::consts::FRAC_PI_2 {
+        turn + std::f64::consts::PI
+    } else {
+        turn
+    }
+}
+
 /// Configuration and runtime state for the on-canvas ruler.
 ///
 /// The ruler is a translucent straight-edge spanning the viewport. Position is
@@ -821,5 +843,37 @@ mod tests {
             assert_eq!(at(-85.0), Some(-1.0), "zoom {total_zoom}");
             assert_eq!(at(95.0), None, "zoom {total_zoom}");
         }
+    }
+
+    #[test]
+    fn finger_turn_follows_the_fingers() {
+        let before = Vector2::new(200.0, 0.0);
+        let turned = |deg: f64| {
+            let rad = deg.to_radians();
+            Vector2::new(rad.cos(), rad.sin()) * 200.0
+        };
+
+        for deg in [-60.0, -2.0, -0.01, 0.0, 0.01, 2.0, 60.0] {
+            let turn = finger_turn(before, turned(deg)).to_degrees();
+            assert!((turn - deg).abs() < 1e-9, "{deg}: {turn}");
+        }
+    }
+
+    #[test]
+    fn finger_turn_ignores_which_finger_comes_first() {
+        let before = Vector2::new(200.0, 0.0);
+        let rad = 3.0_f64.to_radians();
+        let swapped = -Vector2::new(rad.cos(), rad.sin()) * 200.0;
+
+        let turn = finger_turn(before, swapped).to_degrees();
+        assert!((turn - 3.0).abs() < 1e-9, "{turn}");
+    }
+
+    #[test]
+    fn finger_turn_matches_the_screen_direction_of_rotation() {
+        // Window coordinates point down, so turning from right towards down is a positive angle,
+        // as the ruler's own angle is.
+        let turn = finger_turn(Vector2::new(1.0, 0.0), Vector2::new(1.0, 0.1));
+        assert!(turn > 0.0);
     }
 }

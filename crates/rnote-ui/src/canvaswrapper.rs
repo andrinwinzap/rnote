@@ -11,7 +11,7 @@ use p2d::math::Vector2;
 use rnote_compose::penevent::ShortcutKey;
 use rnote_engine::Camera;
 use rnote_engine::ext::GraphenePointExt;
-use rnote_engine::pens::pensconfig::rulerconfig::{RulerTurn, touch_midpoint};
+use rnote_engine::pens::pensconfig::rulerconfig::{RulerTurn, finger_turn, touch_midpoint};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -30,9 +30,8 @@ struct RulerDragBegin {
     angle_begin: f64,
     /// The turn so far, which decides whether the ruler is held at a common angle.
     turn: RulerTurn,
-    /// The angle the gesture had turned by at the last update, to get at the turn since it.
-    /// The gesture itself reports the angle since it began.
-    last_gesture_angle: f64,
+    /// The line from one finger to the other at the last update, to get at the turn since it.
+    last_fingers: Option<Vector2>,
     /// When the ruler was last updated, for logging how often the gesture reports.
     last_update: Instant,
     /// Where the midpoint of the fingers was at the last update, to log it jumping.
@@ -53,6 +52,14 @@ fn touch_points_of(gesture: &GestureZoom) -> Vec<Vector2> {
 ///
 /// `Gesture::bounding_box_center` would do, but it goes through an integer rectangle: see
 /// [`touch_midpoint`].
+/// The line from one finger to the other, when there are two.
+fn finger_line(points: &[Vector2]) -> Option<Vector2> {
+    match points {
+        [a, b, ..] => Some(*b - *a),
+        _ => None,
+    }
+}
+
 fn touch_midpoint_of(gesture: &GestureZoom) -> Option<Vector2> {
     touch_midpoint(touch_points_of(gesture)).or_else(|| {
         gesture
@@ -242,26 +249,32 @@ fn apply_two_finger_ruler_update(
     };
     let canvas = canvaswrapper.canvas();
     let zoom_gesture = &canvaswrapper.imp().canvas_zoom_gesture;
-    let rotate_gesture = &canvaswrapper.imp().canvas_rotate_gesture;
 
-    let Some(centroid_now) = touch_midpoint_of(zoom_gesture) else {
+    // The turn and the midpoint both come from these points, so the two always agree: see
+    // `finger_turn`.
+    let points = touch_points_of(zoom_gesture);
+    let Some(centroid_now) = touch_midpoint(points.iter().copied()).or_else(|| {
+        zoom_gesture
+            .bounding_box_center()
+            .map(|(x, y)| Vector2::new(x, y))
+    }) else {
         return;
     };
     let now = Instant::now();
     let translation = centroid_now - begin.centroid_begin;
 
-    // The rotation is as the gesture reports it: it does not flicker, and anything done to it would
-    // put the ruler behind the fingers.
-    let angle_delta = rotate_gesture.angle_delta();
+    let fingers_now = finger_line(&points);
+    let step = match (begin.last_fingers, fingers_now) {
+        (Some(before), Some(after)) => finger_turn(before, after),
+        _ => 0.0,
+    };
     let config_shared = canvas.engine_ref().engine_config().clone();
     // The common angles hold the ruler while it is turned to within a degree and a half of one, and
     // draw it on gently from there.
     let new_angle = {
         let config = config_shared.read();
         let ruler = &config.pens_config.brush_config.ruler_config;
-        begin
-            .turn
-            .update(ruler, angle_delta - begin.last_gesture_angle)
+        begin.turn.update(ruler, step)
     };
     // What the gesture reported and what became of it, for every update: the only way to tell why
     // the ruler is hard to place with two fingers is to look at what the fingers send.
@@ -271,14 +284,10 @@ fn apply_two_finger_ruler_update(
     if since_last_ms > 120.0 {
         // How far apart the fingers are says how finely their rotation can be told: the angle
         // between two points changes by about a pixel over their distance for each pixel one moves.
-        let points = touch_points_of(zoom_gesture);
-        let separation = match points.as_slice() {
-            [a, b, ..] => (*b - *a).length(),
-            _ => 0.0,
-        };
+        let separation = fingers_now.map(|line| line.length()).unwrap_or(0.0);
         debug!(
             since_last_ms,
-            step_deg = (angle_delta - begin.last_gesture_angle).to_degrees(),
+            step_deg = step.to_degrees(),
             jump = (centroid_now - begin.last_centroid).length(),
             touch_points = points.len(),
             finger_separation_px = separation,
@@ -287,7 +296,7 @@ fn apply_two_finger_ruler_update(
         );
     }
     trace!(
-        gesture_angle_deg = angle_delta.to_degrees(),
+        step_deg = step.to_degrees(),
         shown_angle_deg = new_angle.to_degrees(),
         touch_points = zoom_gesture.sequences().len(),
         centroid = format!("{:.2},{:.2}", centroid_now.x, centroid_now.y),
@@ -308,7 +317,8 @@ fn apply_two_finger_ruler_update(
     }
     begin.last_centroid = centroid_now;
     begin.last_update = now;
-    begin.last_gesture_angle = angle_delta;
+    // Kept when a finger is not reported for a moment, so the turn picks up from where it was.
+    begin.last_fingers = fingers_now.or(begin.last_fingers);
     // The rotation applied to the anchor's offset-from-pivot uses the EFFECTIVE
     // angular change (after snap), not the raw gesture delta, so the anchor
     // tracks the snapped ruler line.
@@ -1056,7 +1066,7 @@ mod imp {
                                     centroid_begin: bbcenter,
                                     angle_begin,
                                     turn: RulerTurn::new(angle_begin),
-                                    last_gesture_angle: 0.0,
+                                    last_fingers: finger_line(&touch_points_of(gesture)),
                                     last_update: Instant::now(),
                                     last_centroid: bbcenter,
                                 }));
@@ -1083,11 +1093,9 @@ mod imp {
                     move |gesture, scale| {
                         let canvas = canvaswrapper.canvas();
 
-                        // When a two-finger gesture begins on the ruler, suppress canvas
-                        // zoom and apply the combined translate + rotate around the
-                        // (live) centroid to the ruler.
+                        // A two-finger gesture that began on the ruler moves the ruler, not the
+                        // canvas: that is done on every update, below.
                         if ruler_drag.get().is_some() {
-                            apply_two_finger_ruler_update(&canvaswrapper, &ruler_drag);
                             return;
                         }
 
@@ -1123,15 +1131,18 @@ mod imp {
                     }
                 ));
 
-                self.canvas_rotate_gesture.connect_angle_changed(clone!(
+                // The ruler follows every report the touchscreen makes. The zoom and rotate
+                // gestures only report when their own value changes, and moving the ruler on
+                // those left it standing while the fingers moved in a way that changed neither.
+                self.canvas_zoom_gesture.connect_update(clone!(
                     #[strong]
                     ruler_drag,
                     #[weak(rename_to=canvaswrapper)]
                     obj,
-                    move |_gesture, _angle, _angle_delta| {
-                        let Some(_) = ruler_drag.get() else {
+                    move |_gesture, _event_sequence| {
+                        if ruler_drag.get().is_none() {
                             return;
-                        };
+                        }
                         apply_two_finger_ruler_update(&canvaswrapper, &ruler_drag);
                     }
                 ));
