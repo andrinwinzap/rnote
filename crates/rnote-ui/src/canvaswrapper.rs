@@ -39,19 +39,22 @@ struct RulerDragBegin {
     last_centroid: Vector2,
 }
 
+/// Where the fingers on a gesture are, at the precision the touchscreen reports them.
+fn touch_points_of(gesture: &GestureZoom) -> Vec<Vector2> {
+    gesture
+        .sequences()
+        .iter()
+        .filter_map(|sequence| gesture.point(Some(sequence)))
+        .map(|(x, y)| Vector2::new(x, y))
+        .collect()
+}
+
 /// The midpoint of the fingers on a gesture, at the precision of the touch points.
 ///
 /// `Gesture::bounding_box_center` would do, but it goes through an integer rectangle: see
 /// [`touch_midpoint`].
 fn touch_midpoint_of(gesture: &GestureZoom) -> Option<Vector2> {
-    let points = gesture
-        .sequences()
-        .iter()
-        .filter_map(|sequence| gesture.point(Some(sequence)))
-        .map(|(x, y)| Vector2::new(x, y))
-        .collect::<Vec<Vector2>>();
-
-    touch_midpoint(points).or_else(|| {
+    touch_midpoint(touch_points_of(gesture)).or_else(|| {
         gesture
             .bounding_box_center()
             .map(|(x, y)| Vector2::new(x, y))
@@ -266,11 +269,20 @@ fn apply_two_finger_ruler_update(
     // A pause in the middle of a turn is what a ruler that sticks looks like from here: what the
     // fingers did before and after it is what says whether they moved while nothing was reported.
     if since_last_ms > 120.0 {
+        // How far apart the fingers are says how finely their rotation can be told: the angle
+        // between two points changes by about a pixel over their distance for each pixel one moves.
+        let points = touch_points_of(zoom_gesture);
+        let separation = match points.as_slice() {
+            [a, b, ..] => (*b - *a).length(),
+            _ => 0.0,
+        };
         debug!(
             since_last_ms,
             step_deg = (angle_delta - begin.last_gesture_angle).to_degrees(),
             jump = (centroid_now - begin.last_centroid).length(),
-            touch_points = zoom_gesture.sequences().len(),
+            touch_points = points.len(),
+            finger_separation_px = separation,
+            one_pixel_is_deg = (1.0 / separation.max(1.0)).atan().to_degrees(),
             "ruler two-finger update after a pause"
         );
     }
