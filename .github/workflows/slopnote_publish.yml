@@ -110,7 +110,7 @@ jobs:
                   [Flatpak Repo]
                   Title=Slopnote
                   Url=${{ vars.SLOPNOTE_REPO_URL }}/repo
-                  Homepage=https://github.com/andrinwinzap/rnote
+                  Homepage=https://github.com/andrinwinzap/slopnote
                   Comment=Andrin's own build of Rnote
                   Description=Rnote with the features from Andrin's fork
                   GPGKey=$(cat key.base64)
