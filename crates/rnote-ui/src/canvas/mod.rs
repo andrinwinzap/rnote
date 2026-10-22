@@ -78,6 +78,8 @@ mod imp {
         pub(crate) drawing_cursor_enabled: Cell<bool>,
         /// Whether a pen is hovering over or drawing on the canvas.
         pub(crate) pen_in_use: Cell<bool>,
+        /// Where the pen last was, to tell the mouse moving from the motion GTK sends for the pen.
+        pub(crate) last_pen_position: Cell<Option<(f64, f64)>>,
 
         pub(crate) engine: RefCell<Engine>,
         pub(crate) engine_task_handler_handle: RefCell<Option<glib::JoinHandle<()>>>,
@@ -176,6 +178,7 @@ mod imp {
                 drop_target,
                 drawing_cursor_enabled: Cell::new(false),
                 pen_in_use: Cell::new(false),
+                last_pen_position: Cell::new(None),
 
                 engine: RefCell::new(engine),
                 engine_task_handler_handle: RefCell::new(None),

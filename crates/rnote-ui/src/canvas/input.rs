@@ -1,6 +1,6 @@
 // Imports
 use super::RnCanvas;
-use gtk4::{Native, gdk, glib, graphene, prelude::*};
+use gtk4::{Native, gdk, glib, graphene, prelude::*, subclass::prelude::*};
 use p2d::math::Vector2;
 use rnote_compose::penevent::{KeyboardKey, ModifierKey, PenEvent, PenState, ShortcutKey};
 use rnote_compose::penpath::Element;
@@ -47,13 +47,24 @@ pub(crate) fn handle_pointer_controller_event(
     // the last mouse position and generates an unwanted pen event.
     if is_stylus {
         stylus_active = gdk_event_type != gdk::EventType::ProximityOut;
+        canvas.imp().last_pen_position.set(event.position());
     } else if stylus_active {
         // A deliberate mouse click hands control back to the mouse.
         match gdk_event_type {
             gdk::EventType::ButtonPress | gdk::EventType::ButtonRelease => {
                 stylus_active = false;
             }
-            _ => return (glib::Propagation::Proceed, pen_state, stylus_active),
+            _ => {
+                // The pen often leaves without saying so, and the cursor hidden for it would
+                // then stay hidden for the mouse. The motion GTK sends while the pen is in use
+                // is where the pen is, so motion anywhere else is the mouse.
+                if gdk_event_type == gdk::EventType::MotionNotify
+                    && mouse_moved_away_from_pen(canvas, event)
+                {
+                    canvas.set_pen_in_use(false);
+                }
+                return (glib::Propagation::Proceed, pen_state, stylus_active);
+            }
         }
     }
     canvas.set_pen_in_use(stylus_active);
@@ -346,6 +357,17 @@ pub(crate) fn reject_pointer_input(event: &gdk::Event, touch_drawing: bool) -> b
 fn event_is_stylus(event: &gdk::Event) -> bool {
     // As in gtk4 'gtkgesturestylus.c:106' we detect if the pointer is a stylus when it has a device tool
     event.device_tool().is_some()
+}
+
+/// How far from where the pen last was mouse motion has to be to be the mouse moving, in pixels.
+const MOUSE_AWAY_FROM_PEN_DISTANCE: f64 = 8.0;
+
+/// Whether a mouse event is somewhere other than where the pen last was.
+fn mouse_moved_away_from_pen(canvas: &RnCanvas, event: &gdk::Event) -> bool {
+    let (Some(pen), Some(mouse)) = (canvas.imp().last_pen_position.get(), event.position()) else {
+        return true;
+    };
+    Vector2::new(mouse.0 - pen.0, mouse.1 - pen.1).length() > MOUSE_AWAY_FROM_PEN_DISTANCE
 }
 
 fn retrieve_pointer_elements(
