@@ -12,6 +12,41 @@
 </div>
 
 
+# Slopnote
+
+> A fork of [Rnote](https://github.com/flxzt/rnote) with a bunch of features vibe coded on top of it.
+
+Slopnote is a personal fork of Rnote, the handwritten notes app by Felix Zwettler and its contributors.
+Everything below the line is upstream's README, and it describes the app as it is without these changes.
+
+**What the fork adds**
+
+- A ruler: a straight edge on the canvas that strokes snap to. It can be moved and rotated with two fingers, the scroll wheel or the pen on its angle dial, and it snaps to common angles
+- Automatic shape completion: hold the pen still at the end of a stroke to turn it into a line, circle, rectangle or polygon, and keep dragging to adjust the result
+- Scratch to erase: scribble over strokes to erase them, with adjustable thresholds
+- Unit markings on coordinate systems, and shapes that get wider the harder you press
+
+**Please read this first**
+
+All of this was vibe coded: written with an AI coding assistant, and it shows in places.
+Expect rough edges, and don't trust it with notes you can't afford to lose.
+Rnote's maintainers don't accept AI-generated contributions, so none of it is going upstream.
+If something is broken here, [report it here](https://github.com/andrinwinzap/slopnote/issues) and not to them.
+
+**Installing it**
+
+Slopnote has its own app id, so it installs next to Rnote without touching it or its settings.
+It is built from this repository on every push to `main`, and published as a flatpak:
+
+```sh
+flatpak remote-add --if-not-exists slopnote https://slopnote.andrinwinzap.ch/slopnote.flatpakrepo
+flatpak install slopnote ch.andrinwinzap.Slopnote
+```
+
+Rnote is licensed under the GPL-3.0, and so is this fork.
+
+---
+
 # Rnote
 
 > Sketch and take handwritten notes.  
