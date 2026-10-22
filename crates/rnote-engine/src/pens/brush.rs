@@ -689,11 +689,18 @@ impl Brush {
             return widget_flags;
         }
         let BrushState::Drawing {
-            current_stroke_key, ..
+            current_stroke_key,
+            ruler_snap_side,
+            ..
         } = self.state
         else {
             return widget_flags;
         };
+        // A line drawn along the ruler is already as straight as it can be, and making a shape of it
+        // would let it be dragged off the ruler.
+        if ruler_snap_side.is_some() {
+            return widget_flags;
+        }
         // Guard against the timeout task and the pen resuming movement racing each other:
         // only recognize when the pen actually rested at the hold anchor for the entire hold duration.
         let hold_duration = engine_view
