@@ -33,6 +33,9 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, error, warn};
 
+/// How long the pen can be gone before the cursor hidden for it is shown again.
+const PEN_GONE_DELAY: Duration = Duration::from_millis(250);
+
 #[derive(Debug, Default)]
 struct Connections {
     hadjustment: Option<glib::SignalHandlerId>,
@@ -81,6 +84,8 @@ mod imp {
         pub(crate) pen_in_use: Cell<bool>,
         /// Where the pen last was, to tell the mouse moving from the motion GTK sends for the pen.
         pub(crate) last_pen_position: Cell<Option<(f64, f64)>>,
+        /// Shows the cursor again a moment after the pen has gone, unless it is back by then.
+        pub(crate) pen_gone_timeout: RefCell<Option<glib::SourceId>>,
 
         pub(crate) engine: RefCell<Engine>,
         pub(crate) engine_task_handler_handle: RefCell<Option<glib::JoinHandle<()>>>,
@@ -181,6 +186,7 @@ mod imp {
                 drawing_cursor_enabled: Cell::new(false),
                 pen_in_use: Cell::new(false),
                 last_pen_position: Cell::new(None),
+                pen_gone_timeout: RefCell::new(None),
 
                 engine: RefCell::new(engine),
                 engine_task_handler_handle: RefCell::new(None),
@@ -1037,11 +1043,36 @@ impl RnCanvas {
     /// Sets whether a pen is hovering over or drawing on the canvas, which hides the cursor when
     /// the cursor is hidden for the pen.
     pub(crate) fn set_pen_in_use(&self, pen_in_use: bool) {
+        if let Some(timeout) = self.imp().pen_gone_timeout.take() {
+            timeout.remove();
+        }
         if pen_in_use == self.imp().pen_in_use.get() {
             return;
         }
         self.imp().pen_in_use.set(pen_in_use);
         self.update_cursor();
+    }
+
+    /// Says the pen has gone, which shows the cursor again a moment later unless the pen is back
+    /// by then. Switching between the pen and the eraser with a pen button takes the pen away for
+    /// an instant, and the cursor would flash up every time.
+    pub(crate) fn set_pen_gone(&self) {
+        let imp = self.imp();
+        if !imp.pen_in_use.get() || imp.pen_gone_timeout.borrow().is_some() {
+            return;
+        }
+        let timeout = glib::timeout_add_local_once(
+            PEN_GONE_DELAY,
+            clone!(
+                #[weak(rename_to=canvas)]
+                self,
+                move || {
+                    canvas.imp().pen_gone_timeout.take();
+                    canvas.set_pen_in_use(false);
+                }
+            ),
+        );
+        imp.pen_gone_timeout.replace(Some(timeout));
     }
 
     /// Shows the cursor that fits what is on the canvas: none for a pen when the cursor is hidden

@@ -67,7 +67,11 @@ pub(crate) fn handle_pointer_controller_event(
             }
         }
     }
-    canvas.set_pen_in_use(stylus_active);
+    if stylus_active {
+        canvas.set_pen_in_use(true);
+    } else {
+        canvas.set_pen_gone();
+    }
 
     let mut handle_pen_event = false;
     let mut propagation = glib::Propagation::Proceed;
