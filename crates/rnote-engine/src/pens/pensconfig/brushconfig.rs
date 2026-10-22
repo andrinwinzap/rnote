@@ -153,7 +153,7 @@ impl BrushConfig {
     pub const STROKE_WIDTH_MAX: f64 = 500.0;
     pub const SHAPE_RECOGNITION_DELAY_MIN: Duration = Duration::from_millis(100);
     pub const SHAPE_RECOGNITION_DELAY_MAX: Duration = Duration::from_millis(2000);
-    pub const SHAPE_RECOGNITION_DELAY_DEFAULT: Duration = Duration::from_millis(400);
+    pub const SHAPE_RECOGNITION_DELAY_DEFAULT: Duration = Duration::from_millis(200);
 
     pub(crate) fn layer_for_current_options(&self) -> StrokeLayer {
         match &self.style {
