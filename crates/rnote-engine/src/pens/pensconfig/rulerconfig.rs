@@ -178,11 +178,12 @@ impl RulerConfig {
     /// How far from a common angle (0, ±45 and ±90 degrees) the ruler starts being drawn towards
     /// it.
     pub const ANGLE_SNAP_ZONE_DEG: f64 = 6.0;
-    /// How close to a common angle the ruler sits exactly on it.
+    /// How close to a common angle the ruler sits exactly on it, however the fingers wobble.
     ///
-    /// Only the angles within this of a common one cannot be set, and at a fraction of a degree
-    /// that is far finer than anything that can be told apart on the ruler.
-    pub const ANGLE_SNAP_PIN_DEG: f64 = 0.75;
+    /// Wide enough to hold the ruler steady against the jitter of fingers on glass, which is about
+    /// a degree. Turning past it moves the ruler on from the common angle without any jump, so the
+    /// angles next to it are still set by turning a little further.
+    pub const ANGLE_SNAP_PIN_DEG: f64 = 1.5;
     /// Half-width of the snap-to-angle window, in degrees, when *approaching*
     /// a target. Within this many degrees of `0`, `±45`, or `±90`, the angle
     /// gets pulled in to the target.
@@ -313,14 +314,15 @@ impl RulerConfig {
 
     /// Draw an angle towards the common angles (0, ±45 and ±90 degrees).
     ///
-    /// The ruler sits exactly on a common angle while it is turned to within a fraction of a degree
-    /// of it, and around that it is drawn in ever more strongly the closer it gets, so that turning
-    /// past a common angle has to be meant. At the edge of the zone the pull is gone, so nothing
-    /// ever jumps.
+    /// The ruler sits exactly on a common angle while it is turned to within `ANGLE_SNAP_PIN_DEG`
+    /// of it, so it stays put however the fingers wobble. Beyond that it moves on at a steady rate
+    /// a little faster than the turn, which catches up what the pin held back by the edge of the
+    /// zone, where the turn is left alone: nothing jumps and nothing moves out of step.
     ///
-    /// Being drawn in is not the same as being stuck: the angles next to a common one are set by
-    /// turning further than they are, since the turn near a common angle is answered with a much
-    /// smaller change of the ruler. Two degrees off 90 is three and a half degrees of turning.
+    /// The rate matters as much as the pin. A turn that is answered by a steeper change of the ruler
+    /// than itself makes the ruler shake with the fingers, a half degree wobble of which comes out
+    /// as a degree or more, so it is kept as near to the turn as the catching up allows: a third
+    /// more. The angles next to a common one are reached by turning a little further than they are.
     pub fn attract_angle(&self, angle_rad: f64) -> f64 {
         const TARGETS_DEG: [f64; 5] = [-90.0, -45.0, 0.0, 45.0, 90.0];
 
@@ -335,16 +337,20 @@ impl RulerConfig {
         else {
             return angle_rad;
         };
-        if distance_deg.abs() >= Self::ANGLE_SNAP_ZONE_DEG {
+        let away = distance_deg.abs();
+        if away >= Self::ANGLE_SNAP_ZONE_DEG {
             return angle_rad;
         }
-        // Zero at the pin, where the ruler sits on the common angle, and one at the edge of the
-        // zone, where the turn is left alone.
-        let pulled_in = ((distance_deg.abs() - Self::ANGLE_SNAP_PIN_DEG)
-            / (Self::ANGLE_SNAP_ZONE_DEG - Self::ANGLE_SNAP_PIN_DEG))
-            .clamp(0.0, 1.0);
-        // The angle grows against the normalized one, so what is left of the distance is taken off.
-        angle_rad + distance_deg.to_radians() * (1.0 - pulled_in * pulled_in)
+        // How far from the common angle the ruler is: none while pinned, and then growing steadily
+        // so that it has caught up with the turn at the edge of the zone.
+        let shown = if away <= Self::ANGLE_SNAP_PIN_DEG {
+            0.0
+        } else {
+            (away - Self::ANGLE_SNAP_PIN_DEG) * Self::ANGLE_SNAP_ZONE_DEG
+                / (Self::ANGLE_SNAP_ZONE_DEG - Self::ANGLE_SNAP_PIN_DEG)
+        };
+        // The angle grows against the normalized one, so what the ruler holds back is added.
+        angle_rad + (distance_deg - shown.copysign(distance_deg)).to_radians()
     }
 
     /// Rotate a position around the pivot by the given angle, both in the same coordinate space.
@@ -592,18 +598,66 @@ mod tests {
     }
 
     #[test]
-    fn turning_next_to_a_common_angle_barely_moves_the_ruler() {
+    fn the_ruler_does_not_move_while_the_fingers_wobble_around_a_common_angle() {
         let ruler = horizontal_ruler();
 
-        // Four degrees of turning across 90 degrees, which without the pull would be four degrees
-        // of ruler, comes out as a fraction of a degree. This is what holds the ruler in place.
-        let below = ruler.attract_angle(88f64.to_radians()).to_degrees();
-        let above = ruler.attract_angle(92f64.to_radians()).to_degrees();
+        // Fingers on glass wobble by about a degree: that must not reach the ruler at all.
+        let shown = [88.6f64, 89.2, 90.0, 90.7, 91.4]
+            .map(|degrees| ruler.attract_angle(degrees.to_radians()).to_degrees());
+
+        for degrees in shown {
+            assert!(
+                (degrees - 90.0).abs() < 1e-9,
+                "the ruler moved to {degrees}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ruler_never_moves_much_faster_than_the_fingers_do() {
+        let ruler = horizontal_ruler();
+
+        // A ruler that answers a turn with a steeper change of its own makes a wobble of the
+        // fingers shake the ruler: this is what the first version of the snap did, with a rate of
+        // up to three, and what made the ruler hard to place by two fingers.
+        let step = 0.01f64;
+        let mut fastest = 0.0f64;
+        let mut degrees = 82.0f64;
+        while degrees < 98.0 {
+            let here = ruler.attract_angle(degrees.to_radians()).to_degrees();
+            let next = ruler
+                .attract_angle((degrees + step).to_radians())
+                .to_degrees();
+            fastest = fastest.max((next - here) / step);
+            degrees += step;
+        }
 
         assert!(
-            above - below < 1.0,
-            "expected the ruler to be held, went from {below} to {above}"
+            fastest < 1.4,
+            "the ruler moves {fastest} times as fast as the fingers"
         );
+    }
+
+    #[test]
+    fn a_wobble_next_to_a_common_angle_is_not_made_larger() {
+        let ruler = horizontal_ruler();
+
+        // The same half degree wobble, at every distance from the common angle that is inside the
+        // zone, must come out as a wobble of at most about that size.
+        for away in [0.0f64, 1.0, 2.0, 3.0, 4.0, 5.0, 5.9] {
+            let low = ruler
+                .attract_angle((90.0 - away - 0.25).to_radians())
+                .to_degrees();
+            let high = ruler
+                .attract_angle((90.0 - away + 0.25).to_radians())
+                .to_degrees();
+
+            assert!(
+                (high - low).abs() < 0.7,
+                "{away} degrees away: a wobble of 0.5 came out as {}",
+                (high - low).abs()
+            );
+        }
     }
 
     #[test]
